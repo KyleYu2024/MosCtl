@@ -2,9 +2,12 @@
 set -e
 
 # ================= 配置区 =================
-# ✅ 已修正: 仓库地址改为 KyleYu2024/mosctl
+# 仓库地址 (你的项目)
 REPO_URL="https://github.com/KyleYu2024/mosctl.git" 
 MOSDNS_VERSION="v5.3.3"
+
+# ✅ 核心修改: 定义 GitHub 代理前缀
+GH_PROXY="https://ghproxy.net/"
 # =========================================
 
 # 颜色
@@ -13,10 +16,11 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始本地部署流程 (Repo: KyleYu2024/mosctl)...${NC}"
+echo -e "${GREEN}🚀 开始本地部署流程 (国内加速版)...${NC}"
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/7] 安装依赖...${NC}"
+# 换源太麻烦，先假设 apt 能用，或者用户自己处理 apt 源
 apt update && apt install -y curl wget git nano net-tools dnsutils unzip
 
 # 2. 清理端口
@@ -24,27 +28,34 @@ echo -e "${YELLOW}[2/7] 清理 53 端口...${NC}"
 systemctl stop systemd-resolved 2>/dev/null || true
 systemctl disable systemd-resolved 2>/dev/null || true
 rm -f /etc/resolv.conf
+# 临时使用阿里 DNS，保证国内下载顺畅
 echo "nameserver 223.5.5.5" > /etc/resolv.conf
 
-# 3. 安装 MosDNS
+# 3. 安装 MosDNS (使用代理)
 echo -e "${YELLOW}[3/7] 安装 MosDNS 主程序...${NC}"
 cd /tmp
-wget -q -O mosdns.zip "https://github.com/IrineSistiana/mosdns/releases/download/${MOSDNS_VERSION}/mosdns-linux-amd64.zip"
+# ✅ 加速下载主程序
+wget -q -O mosdns.zip "${GH_PROXY}https://github.com/IrineSistiana/mosdns/releases/download/${MOSDNS_VERSION}/mosdns-linux-amd64.zip"
 unzip -o mosdns.zip
 mv mosdns /usr/local/bin/mosdns
 chmod +x /usr/local/bin/mosdns
 
-# 4. 下载规则
+# 4. 下载规则 (使用代理)
 echo -e "${YELLOW}[4/7] 下载规则文件...${NC}"
 mkdir -p /etc/mosdns/rules
+
 echo "Downloading GeoSite CN..."
-wget -q -O /etc/mosdns/rules/geosite_cn.txt https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt
+# ✅ 加速下载规则
+wget -q -O /etc/mosdns/rules/geosite_cn.txt "${GH_PROXY}https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt"
+
 echo "Downloading GeoIP CN..."
-wget -q -O /etc/mosdns/rules/geoip_cn.txt https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt
+wget -q -O /etc/mosdns/rules/geoip_cn.txt "${GH_PROXY}https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"
+
 echo "Downloading Apple..."
-wget -q -O /etc/mosdns/rules/geosite_apple.txt https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt
+wget -q -O /etc/mosdns/rules/geosite_apple.txt "${GH_PROXY}https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt"
+
 echo "Downloading No-CN List..."
-wget -q -O /etc/mosdns/rules/geosite_no_cn.txt https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt
+wget -q -O /etc/mosdns/rules/geosite_no_cn.txt "${GH_PROXY}https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
 
 # 补全空文件
 touch /etc/mosdns/rules/force-cn.txt
@@ -52,18 +63,18 @@ touch /etc/mosdns/rules/force-nocn.txt
 touch /etc/mosdns/rules/hosts.txt
 touch /etc/mosdns/rules/local-ptr.txt
 
-# 5. 拉取你的配置
+# 5. 拉取你的配置 (使用代理)
 echo -e "${YELLOW}[5/7] 拉取最新配置...${NC}"
 cd ~
 rm -rf mosctl
-# 克隆仓库
-git clone ${REPO_URL} mosctl || { echo -e "${RED}克隆失败！请检查 GitHub 仓库 KyleYu2024/mosctl 是否存在。${NC}"; exit 1; }
+# ✅ 加速克隆仓库
+git clone "${GH_PROXY}${REPO_URL}" mosctl || { echo -e "${RED}克隆失败！请检查网络或代理状态。${NC}"; exit 1; }
 
-# 应用配置 (确保你的仓库里有 templates/config.yaml)
+# 应用配置
 if [ -f ~/mosctl/templates/config.yaml ]; then
     cp ~/mosctl/templates/config.yaml /etc/mosdns/config.yaml
 else
-    echo -e "${RED}错误：在仓库里没找到 templates/config.yaml 文件！${NC}"
+    echo -e "${RED}错误：仓库中未找到 config.yaml${NC}"
     exit 1
 fi
 
