@@ -3,8 +3,8 @@ set -e
 
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
-DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.4"
+DEFAULT_MOSDNS_VERSION="v5.3.4"
+SCRIPT_VERSION="v1.0.0"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -14,11 +14,12 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION})...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 正式版)...${NC}"
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/8] 环境准备...${NC}"
-apt update && apt install -y curl wget git nano net-tools dnsutils unzip iptables
+# 【改动】新增 cron 依赖，确保定时任务可用
+apt update && apt install -y curl wget git nano net-tools dnsutils unzip iptables cron
 
 # 修复 PATH
 if ! grep -q "/usr/local/bin" ~/.bashrc; then
@@ -112,12 +113,10 @@ sync_config() {
     
     if [ -f "\$TEMP_DIR/templates/config.yaml" ]; then
         echo "⚙️  应用新配置..."
-        # 备份当前配置
         cp /etc/mosdns/config.yaml /etc/mosdns/config.yaml.bak
         cp "\$TEMP_DIR/templates/config.yaml" /etc/mosdns/config.yaml
         
         echo "🔄 重启服务..."
-        # 【改动】重启前先重置失败计数，防止 Systemd 锁死
         systemctl reset-failed mosdns
         
         if systemctl restart mosdns; then
@@ -125,7 +124,6 @@ sync_config() {
             rm -rf "\$TEMP_DIR"
         else
             echo -e "\${RED}❌ 启动失败！自动回滚...\${PLAIN}"
-            # 打印少量日志供排查
             echo "--- 错误日志 (最后10行) ---"
             tail -n 10 \$LOG_FILE
             echo "-------------------------"
@@ -280,6 +278,10 @@ uninstall_mosdns() {
         rm -rf /etc/mosdns
         rm -f /usr/local/bin/mosdns
         rm -f /var/log/mosdns.log
+        
+        # 删除定时任务
+        crontab -l 2>/dev/null | grep -v "mosctl update" | crontab -
+        
         echo "nameserver 223.5.5.5" > /etc/resolv.conf
         echo -e "\${GREEN}✅ 卸载完成。再见！\${PLAIN}"
         rm -f /usr/local/bin/mosctl
@@ -378,14 +380,12 @@ fi
 config_confirm=${config_confirm:-y}
 
 if [[ "$config_confirm" == "y" ]]; then
-    # 1. 国内
     read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns < /dev/tty
     local_dns=${local_dns:-"udp://119.29.29.29"}
     if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
     sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
     echo "  - 国内 DNS 已设置为: $local_dns"
 
-    # 2. 国外
     read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns < /dev/tty
     remote_dns=${remote_dns:-"10.10.2.252:53"}
     sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"${remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
@@ -410,7 +410,6 @@ Description=MosDNS Service
 After=network.target
 OnFailure=mosdns-rescue.service
 [Service]
-# 【关键改动】将重启间隔限制放开，设为0表示不限制，防止折腾时被锁死
 StartLimitInterval=0
 Type=simple
 ExecStartPre=-/usr/local/bin/mosctl rescue disable silent
@@ -421,6 +420,15 @@ LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# 7.5 配置自动更新 (Crontab)
+echo -e "${YELLOW}[7.5/8] 配置自动更新任务 (每天凌晨 2 点)...${NC}"
+if ! crontab -l 2>/dev/null | grep -q "mosctl update"; then
+    (crontab -l 2>/dev/null; echo "0 2 * * * /usr/local/bin/mosctl update > /dev/null 2>&1") | crontab -
+    echo -e "${GREEN}✅ 已添加自动更新计划任务${NC}"
+else
+    echo "计划任务已存在，跳过。"
+fi
 
 # 8. 启动
 echo -e "${YELLOW}[8/8] 启动服务...${NC}"
