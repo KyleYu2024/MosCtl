@@ -6,9 +6,7 @@ api:
   http: "0.0.0.0:8080"
 
 plugins:
-  # ====================
-  # 1. 资源定义
-  # ====================
+  # 1. 资源：直连列表
   - tag: whitelist
     type: domain_set
     args:
@@ -16,6 +14,7 @@ plugins:
         - "/etc/mosdns/rules/cloud_direct.txt"
         - "/etc/mosdns/rules/local_direct.txt"
 
+  # 2. 资源：代理列表
   - tag: blocklist
     type: domain_set
     args:
@@ -23,6 +22,7 @@ plugins:
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
+  # 3. 资源：国内域名库
   - tag: geosite_cn
     type: domain_set
     args:
@@ -31,69 +31,51 @@ plugins:
       tags:
         - "cn"
 
-  # ====================
-  # 2. 基础组件
-  # ====================
-  
-  # [补全缺失的 hosts 插件]
-  - tag: hosts
-    type: hosts
-    args:
-      files:
-        - "/etc/hosts"
-
+  # 4. 转发：国内 DNS (阿里)
   - tag: forward_local
     type: forward
     args:
       upstreams:
         - addr: "223.5.5.5"
-          enable_ecs: true
 
+  # 5. 转发：国外 DNS (Mihomo)
   - tag: forward_remote
     type: forward
     args:
       upstreams:
         - addr: "10.10.2.252:53"
 
+  # 6. 缓存
   - tag: lazy_cache
     type: cache
     args:
       size: 20480
       lazy_cache_ttl: 86400
 
-  # ====================
-  # 3. 动作序列
-  # ====================
-  
-  - tag: resolve_cn
-    type: sequence
-    args:
-      - exec: $lazy_cache
-      - exec: $forward_local
-
-  - tag: resolve_fallback
-    type: sequence
-    args:
-      - exec: $forward_remote
-
-  # ====================
-  # 4. 主逻辑流水线
-  # ====================
+  # 7. 主流程 (简单粗暴，不再嵌套)
   - tag: main_sequence
     type: sequence
     args:
-      - exec: $hosts 
+      # (1) 查缓存
+      - exec: $lazy_cache
 
+      # (2) 命中白名单 -> 走阿里 -> 结束
       - matches: 
         - qname $whitelist
-        exec: $resolve_cn
+        exec: $forward_local
+        exec: return
 
+      # (3) 命中黑名单 -> 走 Mihomo -> 结束
       - matches: 
         - qname $blocklist
-        exec: $resolve_fallback
+        exec: $forward_remote
+        exec: return
 
+      # (4) 命中 GeoSite CN -> 走阿里 -> 结束
       - matches: 
         - qname $geosite_cn
-        exec: $resolve_cn
+        exec: $forward_local
+        exec: return
 
-      - exec: $resolve_fallback
+      # (5) 剩下的全走 Mihomo
+      - exec: $forward_remote
