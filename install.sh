@@ -7,7 +7,7 @@ REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 MOSDNS_VERSION="v5.3.3"
 
 # ✅ 核心修改: 定义 GitHub 代理前缀
-GH_PROXY="https://ghproxy.net/"
+#GH_PROXY="https://ghproxy.net/"
 # =========================================
 
 # 颜色
