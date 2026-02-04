@@ -3,7 +3,9 @@ set -e
 
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
-MOSDNS_VERSION="v5.3.3"
+# 这里只定义兜底版本，脚本会自动去抓最新的
+DEFAULT_MOSDNS_VERSION="v5.3.3"
+SCRIPT_VERSION="v0.3.0"
 GH_PROXY="" 
 # =========================================
 
@@ -13,7 +15,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (v3.6 交互修复版)...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION})...${NC}"
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/8] 环境准备...${NC}"
@@ -25,6 +27,20 @@ if ! grep -q "/usr/local/bin" ~/.bashrc; then
     export PATH=$PATH:/usr/local/bin
 fi
 
+# ================= 1.5 获取最新版本 =================
+echo -e "${YELLOW}🔍 正在检查 MosDNS 最新版本...${NC}"
+# 尝试从 GitHub API 获取最新 Tag
+LATEST_TAG=$(curl -sL https://api.github.com/repos/IrineSistiana/mosdns/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
+
+if [ -n "$LATEST_TAG" ]; then
+    MOSDNS_VERSION="$LATEST_TAG"
+    echo -e "✅ 检测到最新版本: ${GREEN}${MOSDNS_VERSION}${NC}"
+else
+    MOSDNS_VERSION="$DEFAULT_MOSDNS_VERSION"
+    echo -e "${RED}⚠️  无法获取最新版本，将使用稳定版: ${MOSDNS_VERSION}${NC}"
+fi
+# ===================================================
+
 # 2. 清理端口
 echo -e "${YELLOW}[2/8] 清理 53 端口...${NC}"
 systemctl stop systemd-resolved 2>/dev/null || true
@@ -35,9 +51,10 @@ sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
 echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-mosdns.conf
 
 # 3. 安装 MosDNS
-echo -e "${YELLOW}[3/8] 安装 MosDNS 主程序...${NC}"
+echo -e "${YELLOW}[3/8] 安装 MosDNS 主程序 (${MOSDNS_VERSION})...${NC}"
 if [ ! -f "/usr/local/bin/mosdns" ]; then
     cd /tmp
+    # 使用动态获取到的 MOSDNS_VERSION 变量
     wget -q -O mosdns.zip "${GH_PROXY}https://github.com/IrineSistiana/mosdns/releases/download/${MOSDNS_VERSION}/mosdns-linux-amd64.zip"
     unzip -o mosdns.zip
     mv mosdns /usr/local/bin/mosdns
@@ -47,16 +64,18 @@ else
 fi
 
 # 4. 生成 Mosctl 管理工具
-echo -e "${YELLOW}[4/8] 生成 mosctl (v3.6)...${NC}"
+echo -e "${YELLOW}[4/8] 生成 mosctl (${SCRIPT_VERSION})...${NC}"
 cat > /usr/local/bin/mosctl <<EOF
 #!/bin/bash
-# MosDNS 管理工具 v3.6
+# MosDNS 管理工具 ${SCRIPT_VERSION}
 RESCUE_DNS="223.5.5.5"
 REPO_URL="${REPO_URL}"
 GH_PROXY="${GH_PROXY}"
 CONFIG_FILE="/etc/mosdns/config.yaml"
-VERSION="${MOSDNS_VERSION}"
+KERNEL_VERSION="${MOSDNS_VERSION}"
+SCRIPT_VER="${SCRIPT_VERSION}"
 LOG_FILE="/var/log/mosdns.log"
+CACHE_FILE="/etc/mosdns/cache.dump"
 
 # 颜色
 RED='\033[0;31m'
@@ -152,6 +171,18 @@ edit_rule() {
     echo -e "\${GREEN}✅ 规则已应用。\${PLAIN}"
 }
 
+flush_cache() {
+    echo -e "\n\${YELLOW}🧹 正在清空 DNS 缓存...\${PLAIN}"
+    if [ -f "\$CACHE_FILE" ]; then
+        rm -f "\$CACHE_FILE"
+        systemctl restart mosdns
+        echo -e "\${GREEN}✅ 缓存已清空并重建！\${PLAIN}"
+    else
+        systemctl restart mosdns
+        echo -e "\${GREEN}✅ 缓存文件不存在，已重启服务。\${PLAIN}"
+    fi
+}
+
 rules_menu() {
     clear
     echo -e "\${GREEN}==============================\${PLAIN}"
@@ -238,9 +269,9 @@ show_menu() {
     if [ "\$status_raw" == "active" ]; then status_text="\${GREEN}🟢 运行中\${PLAIN}"; else status_text="\${RED}🔴 未运行\${PLAIN}"; fi
 
     echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e "\${GREEN}   MosCtl 管理面板   \${PLAIN}"
+    echo -e "\${GREEN}   MosDNS 管理面板 (\${SCRIPT_VER})   \${PLAIN}"
     echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e " 内核版本: \${GREEN}\${VERSION}\${PLAIN} | 状态: \$status_text"
+    echo -e " 内核版本: \${GREEN}\${KERNEL_VERSION}\${PLAIN} | 状态: \$status_text"
     echo -e "\${GREEN}==============================\${PLAIN}"
     echo -e "  1. 🔄  同步配置 (Git Pull)"
     echo -e "  2. ⚙️   修改上游 DNS"
@@ -249,12 +280,13 @@ show_menu() {
     echo -e "  5. 🚑  开启救援模式"
     echo -e "  6. ♻️   关闭救援模式"
     echo -e "  7. 📊  查看运行日志"
-    echo -e "  8. ▶️   重启服务"
-    echo -e "  9. 🗑️   彻底卸载"
+    echo -e "  8. 🧹  清空 DNS 缓存"
+    echo -e "  9. ▶️   重启服务"
+    echo -e "  10.🗑️   彻底卸载"
     echo -e "  0. 🚪  退出"
     echo -e "\${GREEN}==============================\${PLAIN}"
     echo
-    read -p "请选择 [0-9]: " choice
+    read -p "请选择 [0-10]: " choice
 
     case "\$choice" in
         1) sync_config ;;
@@ -264,13 +296,14 @@ show_menu() {
         5) rescue_enable ;;
         6) rescue_disable ;;
         7) view_logs ;;
-        8) systemctl restart mosdns && echo -e "\${GREEN}已重启\${PLAIN}" ;;
-        9) uninstall_mosdns ;;
+        8) flush_cache ;;
+        9) systemctl restart mosdns && echo -e "\${GREEN}已重启\${PLAIN}" ;;
+        10) uninstall_mosdns ;;
         0) exit 0 ;;
         *) echo -e "\${RED}无效\${PLAIN}" ;;
     esac
     
-    if [ "\$choice" != "7" ] && [ "\$choice" != "0" ] && [ "\$choice" != "9" ] && [ "\$choice" != "2" ] && [ "\$choice" != "3" ]; then
+    if [ "\$choice" != "7" ] && [ "\$choice" != "0" ] && [ "\$choice" != "10" ] && [ "\$choice" != "2" ] && [ "\$choice" != "3" ]; then
         echo; read -p "按回车键返回..." ; show_menu
     elif [ "\$choice" == "2" ] || [ "\$choice" == "3" ]; then
         show_menu
@@ -312,20 +345,14 @@ echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
 
 # ================= 交互式配置环节 =================
 echo -e "${YELLOW}[6.5/8] 交互式配置向导...${NC}"
-
-# 强制使用终端输入，解决 pipe 问题
-# 注意：这里我们尝试从 /dev/tty 读取输入
 if [ -c /dev/tty ]; then
     read -p "是否现在配置上游 DNS？(y/n) [y]: " config_confirm < /dev/tty
 else
-    # 极端情况下没有 tty（纯后台），跳过交互
     config_confirm="n"
 fi
-
 config_confirm=${config_confirm:-y}
 
 if [[ "$config_confirm" == "y" ]]; then
-    
     # 1. 国内
     read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns < /dev/tty
     local_dns=${local_dns:-"udp://119.29.29.29"}
@@ -377,7 +404,7 @@ systemctl enable mosdns
 systemctl restart mosdns
 
 if systemctl is-active --quiet mosdns; then
-    echo -e "${GREEN}✅ 部署完成！${NC}"
+    echo -e "${GREEN}✅ 部署完成！(${SCRIPT_VERSION})${NC}"
     echo -e "👉 输入 ${GREEN}mosctl${NC} 即可打开管理菜单"
 else
     echo -e "${RED}❌ 启动失败，请检查日志${NC}"
