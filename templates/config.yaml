@@ -6,7 +6,9 @@ api:
   http: "0.0.0.0:8080"
 
 plugins:
-  # 1. [资源] 直连列表
+  # ====================
+  # 1. 资源定义
+  # ====================
   - tag: whitelist
     type: domain_set
     args:
@@ -14,7 +16,6 @@ plugins:
         - "/etc/mosdns/rules/cloud_direct.txt"
         - "/etc/mosdns/rules/local_direct.txt"
 
-  # 2. [资源] 代理列表
   - tag: blocklist
     type: domain_set
     args:
@@ -22,71 +23,93 @@ plugins:
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
-  # 3. [资源] 国内域名库
   - tag: geosite_cn
     type: domain_set
     args:
       files:
-        - "/etc/mosdns/geosite.dat:cn"
+        - "/etc/mosdns/geosite.dat:cn"  # 格式已修复
 
-  # 4. [基础] Hosts 解析
+  # ====================
+  # 2. 基础组件
+  # ====================
   - tag: hosts
     type: hosts
     args:
       files:
         - "/etc/hosts"
 
-  # 5. [上游] 国内 DNS (阿里)
   - tag: forward_local
     type: forward
     args:
       upstreams:
         - addr: "223.5.5.5"
 
-  # 6. [上游] 国外 DNS (Mihomo)
   - tag: forward_remote
     type: forward
     args:
       upstreams:
         - addr: "10.10.2.252:53"
 
-  # 7. [缓存] 懒惰缓存
   - tag: lazy_cache
     type: cache
     args:
       size: 20480
       lazy_cache_ttl: 86400
 
-  # 8. [主流程] 逻辑流水线
+  # ====================
+  # 3. 动作子序列 (解决重复 exec 问题的关键)
+  # ====================
+  
+  # [国内解析流]
+  - tag: resolve_cn
+    type: sequence
+    args:
+      - exec: $forward_local
+      - exec: return  # 结束流程，防止继续往下跑
+
+  # [国外/兜底解析流]
+  - tag: resolve_fallback
+    type: sequence
+    args:
+      - exec: $forward_remote
+      - exec: return
+
+  # ====================
+  # 4. 主逻辑流水线
+  # ====================
   - tag: main_sequence
     type: sequence
     args:
       - exec: $hosts
       - exec: $lazy_cache
+
+      # 命中白名单 -> 进国内子序列
       - matches: 
         - qname $whitelist
-        exec: $forward_local
-        exec: return
+        exec: $resolve_cn
+
+      # 命中黑名单 -> 进国外子序列
       - matches: 
         - qname $blocklist
-        exec: $forward_remote
-        exec: return
+        exec: $resolve_fallback
+
+      # 命中 GeoSite CN -> 进国内子序列
       - matches: 
         - qname $geosite_cn
-        exec: $forward_local
-        exec: return
-      - exec: $forward_remote
+        exec: $resolve_cn
 
-  # =========================================
-  # 9. [入口] UDP 监听 (这里就是之前缺的！重要！)
-  # =========================================
+      # 剩下的 -> 进兜底子序列
+      - exec: $resolve_fallback
+
+  # ====================
+  # 5. 服务入口
+  # ====================
   - tag: udp_server
     type: udp_server
     args:
       entry: main_sequence
       listen: ":53"
 
-  # 10. [入口] TCP 监听 (可选，但建议加上)
   - tag: tcp_server
     type: tcp_server
     args:
