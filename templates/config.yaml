@@ -6,9 +6,7 @@ api:
   http: "0.0.0.0:8080"
 
 plugins:
-  # ====================
   # 1. 资源定义
-  # ====================
   - tag: whitelist
     type: domain_set
     args:
@@ -23,21 +21,14 @@ plugins:
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
+  # [重要] 这里现在指向的是纯文本规则
   - tag: geosite_cn
     type: domain_set
     args:
       files:
-        - "/etc/mosdns/geosite.dat:cn"  # 格式已修复
+        - "/etc/mosdns/rules/geosite_cn.txt"
 
-  # ====================
-  # 2. 基础组件
-  # ====================
-  - tag: hosts
-    type: hosts
-    args:
-      files:
-        - "/etc/hosts"
-
+  # 2. 转发插件
   - tag: forward_local
     type: forward
     args:
@@ -56,54 +47,36 @@ plugins:
       size: 20480
       lazy_cache_ttl: 86400
 
-  # ====================
-  # 3. 动作子序列 (解决重复 exec 问题的关键)
-  # ====================
-  
-  # [国内解析流]
+  # 3. 动作子序列
   - tag: resolve_cn
     type: sequence
     args:
       - exec: $forward_local
-      - exec: return  # 结束流程，防止继续往下跑
+      - exec: return
 
-  # [国外/兜底解析流]
   - tag: resolve_fallback
     type: sequence
     args:
       - exec: $forward_remote
       - exec: return
 
-  # ====================
-  # 4. 主逻辑流水线
-  # ====================
+  # 4. 主流程 (已移除 hosts 插件)
   - tag: main_sequence
     type: sequence
     args:
-      - exec: $hosts
       - exec: $lazy_cache
-
-      # 命中白名单 -> 进国内子序列
       - matches: 
         - qname $whitelist
         exec: $resolve_cn
-
-      # 命中黑名单 -> 进国外子序列
       - matches: 
         - qname $blocklist
         exec: $resolve_fallback
-
-      # 命中 GeoSite CN -> 进国内子序列
       - matches: 
         - qname $geosite_cn
         exec: $resolve_cn
-
-      # 剩下的 -> 进兜底子序列
       - exec: $resolve_fallback
 
-  # ====================
-  # 5. 服务入口
-  # ====================
+  # 5. 监听端口
   - tag: udp_server
     type: udp_server
     args:
