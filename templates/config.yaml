@@ -21,20 +21,20 @@ plugins:
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
-  # [重要] 这里指向纯文本规则
   - tag: geosite_cn
     type: domain_set
     args:
       files:
         - "/etc/mosdns/rules/geosite_cn.txt"
 
-  # 2. 转发插件
+  # 2. [关键修改] 国内转发改为 DoH，防劫持
   - tag: forward_local
     type: forward
     args:
       upstreams:
-        - addr: "223.5.5.5"
+        - addr: "https://223.5.5.5/dns-query"
 
+  # 3. 国外转发 (保持不变)
   - tag: forward_remote
     type: forward
     args:
@@ -47,7 +47,7 @@ plugins:
       size: 20480
       lazy_cache_ttl: 86400
 
-  # 3. 动作子序列
+  # 4. 动作子序列
   - tag: resolve_cn
     type: sequence
     args:
@@ -60,7 +60,7 @@ plugins:
       - exec: $forward_remote
       - exec: return
 
-  # 4. 主流程
+  # 5. 主流程
   - tag: main_sequence
     type: sequence
     args:
@@ -76,7 +76,7 @@ plugins:
         exec: $resolve_cn
       - exec: $resolve_fallback
 
-  # 5. 监听端口
+  # 6. 监听端口
   - tag: udp_server
     type: udp_server
     args:
