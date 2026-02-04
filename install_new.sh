@@ -2,8 +2,8 @@
 set -e
 
 # ================= 配置区 =================
-# ✅ 已修正: 用户名改为 KyleYu2024
-REPO_URL="https://github.com/KyleYu2024/MosDNS-Web.git" 
+# ✅ 已修正: 仓库地址改为 KyleYu2024/mosctl
+REPO_URL="https://github.com/KyleYu2024/mosctl.git" 
 MOSDNS_VERSION="v5.3.3"
 # =========================================
 
@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始本地部署流程 (User: KyleYu2024)...${NC}"
+echo -e "${GREEN}🚀 开始本地部署流程 (Repo: KyleYu2024/mosctl)...${NC}"
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/7] 安装依赖...${NC}"
@@ -53,14 +53,19 @@ touch /etc/mosdns/rules/hosts.txt
 touch /etc/mosdns/rules/local-ptr.txt
 
 # 5. 拉取你的配置
-echo -e "${YELLOW}[5/7] 拉取最新配置 (KyleYu2024)...${NC}"
+echo -e "${YELLOW}[5/7] 拉取最新配置...${NC}"
 cd ~
 rm -rf mosctl
-# 尝试克隆
-git clone ${REPO_URL} mosctl || { echo -e "${RED}克隆失败！请检查 GitHub 上是否已存在 MosDNS-Web 仓库。${NC}"; exit 1; }
+# 克隆仓库
+git clone ${REPO_URL} mosctl || { echo -e "${RED}克隆失败！请检查 GitHub 仓库 KyleYu2024/mosctl 是否存在。${NC}"; exit 1; }
 
-# 应用配置
-cp ~/mosctl/templates/config.yaml /etc/mosdns/config.yaml
+# 应用配置 (确保你的仓库里有 templates/config.yaml)
+if [ -f ~/mosctl/templates/config.yaml ]; then
+    cp ~/mosctl/templates/config.yaml /etc/mosdns/config.yaml
+else
+    echo -e "${RED}错误：在仓库里没找到 templates/config.yaml 文件！${NC}"
+    exit 1
+fi
 
 # 6. 设置服务
 echo -e "${YELLOW}[6/7] 配置 Systemd...${NC}"
