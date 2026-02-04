@@ -10,7 +10,7 @@ plugins:
   # 1. 上游 DNS 定义
   # ===========================
   
-  # [防劫持] 阿里 DNS (DoT)
+  # [防劫持] 阿里 DNS (DoT) - 作为备用国内
   - tag: ali
     type: forward
     args:
@@ -18,20 +18,22 @@ plugins:
         - addr: "tls://223.5.5.5:853"
           enable_pipeline: true
 
-  # [防劫持] 腾讯 DNS (DoT)
+  # [防劫持] 腾讯 DNS (DoT) - 作为主要国内
   - tag: local
     type: forward
     args:
       upstreams:
-        - addr: "tls://119.29.29.29:853"
+        # 👇 [锚点] 国内 DNS 修改位置
+        - addr: "tls://119.29.29.29:853" # TAG_LOCAL
           enable_pipeline: true
 
-  # 代理 DNS (Mihomo)
+  # 代理 DNS (Mihomo) - 作为主要国外
   - tag: proxy
     type: forward
     args:
       upstreams:
-        - addr: "10.10.2.252:53"
+        # 👇 [锚点] 国外 DNS 修改位置
+        - addr: "10.10.2.252:53" # TAG_REMOTE
 
   # Google DNS (备用)
   - tag: google
