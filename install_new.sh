@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (v3.3 规则增强版)...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (v3.4 净化版)...${NC}"
 
 # 1. 基础环境与日志修复
 echo -e "${YELLOW}[1/8] 环境准备 & 修复日志系统...${NC}"
@@ -30,7 +30,8 @@ mkdir -p /var/log/journal
 if [ -f /etc/systemd/journald.conf ]; then
     sed -i 's/^#Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
     sed -i 's/^Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
-    systemctl restart systemd-journald || echo -e "${YELLOW}⚠️  日志服务重启失败 (LXC限制)，跳过...${NC}"
+    # 【关键修改】 >/dev/null 2>&1 隐藏系统原本的红色报错
+    systemctl restart systemd-journald >/dev/null 2>&1 || echo -e "${YELLOW}⚠️  日志服务重启受限 (LXC环境)，已自动跳过...${NC}"
 fi
 
 # 2. 清理端口
@@ -55,10 +56,10 @@ else
 fi
 
 # 4. 生成 Mosctl 管理工具
-echo -e "${YELLOW}[4/8] 生成 mosctl (v3.3)...${NC}"
+echo -e "${YELLOW}[4/8] 生成 mosctl (v3.4)...${NC}"
 cat > /usr/local/bin/mosctl <<EOF
 #!/bin/bash
-# MosDNS 管理工具 v3.3
+# MosDNS 管理工具 v3.4
 RESCUE_DNS="223.5.5.5"
 REPO_URL="${REPO_URL}"
 GH_PROXY="${GH_PROXY}"
@@ -172,13 +173,13 @@ rules_menu() {
     echo -e "\${GREEN}    📝 管理自定义规则列表    \${PLAIN}"
     echo -e "\${GREEN}==============================\${PLAIN}"
     echo -e "  1. 🏠 自定义 Hosts (hosts.txt)"
-    echo -e "     -> 手动指定域名的 IP，相当于本地 DNS 记录"
+    echo -e "     -> 相当于本地 DNS 记录 (格式: IP 域名)"
     echo
     echo -e "  2. 🇨🇳 强制走国内 (force-cn.txt)"
-    echo -e "     -> 这些域名强制使用国内 DNS 解析 (例如: 公司内网, BT站)"
+    echo -e "     -> 这些域名强制使用国内 DNS 解析"
     echo
     echo -e "  3. 🌍 强制走国外 (force-nocn.txt)"
-    echo -e "     -> 这些域名强制使用国外/代理 DNS 解析 (例如: 被污染的域名)"
+    echo -e "     -> 这些域名强制使用国外/代理 DNS 解析"
     echo
     echo -e "  0. 🔙 返回主菜单"
     echo -e "\${GREEN}==============================\${PLAIN}"
@@ -253,7 +254,7 @@ show_menu() {
     fi
 
     echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e "\${GREEN}   MosDNS 管理面板 (v3.3)   \${PLAIN}"
+    echo -e "\${GREEN}   MosDNS 管理面板 (v3.4)   \${PLAIN}"
     echo -e "\${GREEN}==============================\${PLAIN}"
     echo -e " Mos版本: \${GREEN}\${VERSION}\${PLAIN}"
     echo -e " 状态: \$status_text"
@@ -364,7 +365,7 @@ systemctl enable mosdns
 systemctl restart mosdns
 
 if systemctl is-active --quiet mosdns; then
-    echo -e "${GREEN}✅ 部署完成！(v3.3)${NC}"
+    echo -e "${GREEN}✅ 部署完成！(v3.4)${NC}"
     echo -e "👉 输入 ${GREEN}mosctl${NC} 即可打开管理菜单"
 else
     echo -e "${RED}❌ 启动失败，请检查日志${NC}"
