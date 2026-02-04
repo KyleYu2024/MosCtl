@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (v3.5 安装向导版)...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (v3.6 交互修复版)...${NC}"
 
 # 1. 基础环境与日志修复
 echo -e "${YELLOW}[1/8] 环境准备 & 修复日志系统...${NC}"
@@ -30,7 +30,7 @@ mkdir -p /var/log/journal
 if [ -f /etc/systemd/journald.conf ]; then
     sed -i 's/^#Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
     sed -i 's/^Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
-    # 【修复】彻底隐藏红色报错
+    # 隐藏报错
     systemctl restart systemd-journald >/dev/null 2>&1 || true
     echo -e "  - 日志服务配置已更新"
 fi
@@ -57,10 +57,10 @@ else
 fi
 
 # 4. 生成 Mosctl 管理工具
-echo -e "${YELLOW}[4/8] 生成 mosctl (v3.5)...${NC}"
+echo -e "${YELLOW}[4/8] 生成 mosctl (v3.6)...${NC}"
 cat > /usr/local/bin/mosctl <<EOF
 #!/bin/bash
-# MosDNS 管理工具 v3.5
+# MosDNS 管理工具 v3.6
 RESCUE_DNS="223.5.5.5"
 REPO_URL="${REPO_URL}"
 GH_PROXY="${GH_PROXY}"
@@ -134,7 +134,6 @@ change_upstream() {
     
     if [ -z "\$new_ip" ]; then echo "已取消"; return; fi
     
-    # 只有当 default_proto 不为空，且用户没有输入协议头时，才强制补全
     if [[ -n "\$default_proto" ]] && [[ "\$new_ip" != *"://"* ]]; then
         new_ip="\${default_proto}://\${new_ip}"
     fi
@@ -194,7 +193,7 @@ config_menu() {
     read -p "请选择: " sub_choice
     case "\$sub_choice" in
         1) change_upstream "国内" "# TAG_LOCAL" "udp" ;;
-        2) change_upstream "国外" "# TAG_REMOTE" "" ;; # 国外不强制补全，方便输入IP:Port
+        2) change_upstream "国外" "# TAG_REMOTE" "" ;;
         0) return ;;
         *) echo -e "\${RED}无效\${PLAIN}" ;;
     esac
@@ -237,9 +236,9 @@ show_menu() {
     if [ "\$status_raw" == "active" ]; then status_text="\${GREEN}🟢 运行中\${PLAIN}"; else status_text="\${RED}🔴 未运行\${PLAIN}"; fi
 
     echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e "\${GREEN}   MosDNS 管理面板 (v3.5)   \${PLAIN}"
+    echo -e "\${GREEN}   MosDNS 管理面板 (v3.6)   \${PLAIN}"
     echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e " 版本: \${GREEN}\${VERSION}\${PLAIN} | 状态: \$status_text"
+    echo -e " 内核版本: \${GREEN}\${VERSION}\${PLAIN} | 状态: \$status_text"
     echo -e "\${GREEN}==============================\${PLAIN}"
     echo -e "  1. 🔄  同步配置 (Git Pull)"
     echo -e "  2. ⚙️   修改上游 DNS"
@@ -311,21 +310,50 @@ echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
 
 # ================= 交互式配置环节 =================
 echo -e "${YELLOW}[6.5/8] 交互式配置向导...${NC}"
-read -p "是否现在配置上游 DNS？(y/n) [y]: " config_confirm
+
+# 【修正】检测是否为管道安装模式，如果是，强制从 /dev/tty 读取输入
+read_cmd="read"
+if [ ! -t 0 ]; then
+    if [ -c /dev/tty ]; then
+        # 管道模式：重定向输入
+        read -p "是否现在配置上游 DNS？(y/n) [y]: " config_confirm < /dev/tty
+    else
+        echo -e "${RED}⚠️  无法检测到终端，跳过交互配置。${NC}"
+        config_confirm="n"
+    fi
+else
+    # 普通模式
+    read -p "是否现在配置上游 DNS？(y/n) [y]: " config_confirm
+fi
+
 config_confirm=${config_confirm:-y}
 
 if [[ "$config_confirm" == "y" ]]; then
+    # 准备读取命令
+    if [ ! -t 0 ] && [ -c /dev/tty ]; then
+        read_cmd="read < /dev/tty"
+    fi
+
     # 1. 国内
-    read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns
+    if [ ! -t 0 ] && [ -c /dev/tty ]; then
+        read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns < /dev/tty
+    else
+        read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns
+    fi
+    
     local_dns=${local_dns:-"udp://119.29.29.29"}
     if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
     sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
     echo "  - 国内 DNS 已设置为: $local_dns"
 
     # 2. 国外
-    read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns
+    if [ ! -t 0 ] && [ -c /dev/tty ]; then
+        read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns < /dev/tty
+    else
+        read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns
+    fi
+    
     remote_dns=${remote_dns:-"10.10.2.252:53"}
-    # 国外不强制补全协议，允许用户输入 IP:Port
     sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"${remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
     echo "  - 国外 DNS 已设置为: $remote_dns"
 fi
@@ -367,7 +395,7 @@ systemctl enable mosdns
 systemctl restart mosdns
 
 if systemctl is-active --quiet mosdns; then
-    echo -e "${GREEN}✅ 部署完成！(v3.5)${NC}"
+    echo -e "${GREEN}✅ 部署完成！(v3.6)${NC}"
     echo -e "👉 输入 ${GREEN}mosctl${NC} 即可打开管理菜单"
 else
     echo -e "${RED}❌ 启动失败，请检查日志${NC}"
