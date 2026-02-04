@@ -4,8 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.3"
-# 【改动】采用更稳定的 gh-proxy.com 加速源
+SCRIPT_VERSION="v0.3.4"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -29,7 +28,6 @@ fi
 
 # ================= 1.5 获取最新版本 =================
 echo -e "${YELLOW}🔍 正在检查 MosDNS 最新版本...${NC}"
-# 尝试获取最新版本，如果失败则使用默认
 LATEST_TAG=$(curl -sL https://api.github.com/repos/IrineSistiana/mosdns/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
 if [ -n "$LATEST_TAG" ]; then
@@ -55,7 +53,6 @@ echo -e "${YELLOW}[3/8] 安装 MosDNS 主程序 (${MOSDNS_VERSION})...${NC}"
 if [ ! -f "/usr/local/bin/mosdns" ]; then
     cd /tmp
     echo "正在下载内核文件..."
-    # 下载内核也走代理
     wget -q --show-progress -O mosdns.zip "${GH_PROXY}https://github.com/IrineSistiana/mosdns/releases/download/${MOSDNS_VERSION}/mosdns-linux-amd64.zip"
     
     unzip -o mosdns.zip > /dev/null 2>&1
@@ -111,20 +108,30 @@ rescue_disable() {
 sync_config() {
     echo -e "\${YELLOW}☁️  正在从 GitHub 拉取最新配置...\${PLAIN}"
     TEMP_DIR=\$(mktemp -d)
-    # 同步配置走代理
     git clone --depth 1 "\${GH_PROXY}\${REPO_URL}" "\$TEMP_DIR" >/dev/null 2>&1
     
     if [ -f "\$TEMP_DIR/templates/config.yaml" ]; then
         echo "⚙️  应用新配置..."
+        # 备份当前配置
         cp /etc/mosdns/config.yaml /etc/mosdns/config.yaml.bak
         cp "\$TEMP_DIR/templates/config.yaml" /etc/mosdns/config.yaml
+        
         echo "🔄 重启服务..."
+        # 【改动】重启前先重置失败计数，防止 Systemd 锁死
+        systemctl reset-failed mosdns
+        
         if systemctl restart mosdns; then
             echo -e "\${GREEN}✅ 同步成功！\${PLAIN}"
             rm -rf "\$TEMP_DIR"
         else
             echo -e "\${RED}❌ 启动失败！自动回滚...\${PLAIN}"
+            # 打印少量日志供排查
+            echo "--- 错误日志 (最后10行) ---"
+            tail -n 10 \$LOG_FILE
+            echo "-------------------------"
+            
             mv /etc/mosdns/config.yaml.bak /etc/mosdns/config.yaml
+            systemctl reset-failed mosdns
             systemctl restart mosdns
             rm -rf "\$TEMP_DIR"
         fi
@@ -156,6 +163,7 @@ change_upstream() {
     sed -i "s|\(.*\)- addr:.*\$tag_marker|\1- addr: \"\$new_ip\" \$tag_marker|" \$CONFIG_FILE
     
     echo "🔄 重启服务生效..."
+    systemctl reset-failed mosdns
     if systemctl restart mosdns; then
         echo -e "\${GREEN}✅ 修改成功！\${PLAIN}"
     else
@@ -171,6 +179,7 @@ edit_rule() {
     echo "按 Ctrl+O 保存，Ctrl+X 退出。"
     read -p "按回车键开始编辑..."
     nano "\$file"
+    systemctl reset-failed mosdns
     systemctl restart mosdns
     echo -e "\${GREEN}✅ 规则已应用。\${PLAIN}"
 }
@@ -179,9 +188,11 @@ flush_cache() {
     echo -e "\n\${YELLOW}🧹 正在清空 DNS 缓存...\${PLAIN}"
     if [ -f "\$CACHE_FILE" ]; then
         rm -f "\$CACHE_FILE"
+        systemctl reset-failed mosdns
         systemctl restart mosdns
         echo -e "\${GREEN}✅ 缓存已清空并重建！\${PLAIN}"
     else
+        systemctl reset-failed mosdns
         systemctl restart mosdns
         echo -e "\${GREEN}✅ 缓存文件不存在，已重启服务。\${PLAIN}"
     fi
@@ -230,7 +241,6 @@ update_geo_rules() {
     mkdir -p /etc/mosdns/rules
     dl() { 
         echo -e "  ☁️  正在下载 \$1 ..."
-        # 更新规则也走代理，并显示进度条
         wget -q --show-progress -O "\$1" "\${GH_PROXY}\$2"
         if [ \$? -eq 0 ]; then
              echo -e "  ✅ \$1 更新成功"
@@ -242,6 +252,8 @@ update_geo_rules() {
     dl "/etc/mosdns/rules/geoip_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"
     dl "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt"
     dl "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
+    
+    systemctl reset-failed mosdns
     systemctl restart mosdns
     echo -e "\${GREEN}✅ 规则更新完毕！\${PLAIN}"
 }
@@ -343,7 +355,6 @@ mkdir -p /etc/mosdns/rules
 download_rule() {
     if [ ! -f "$1" ] || [ ! -s "$1" ]; then
         echo "Downloading $1..."
-        # 初次下载也走代理
         wget -q --show-progress -O "$1" "${GH_PROXY}$2"
     fi
 }
@@ -399,13 +410,13 @@ Description=MosDNS Service
 After=network.target
 OnFailure=mosdns-rescue.service
 [Service]
+# 【关键改动】将重启间隔限制放开，设为0表示不限制，防止折腾时被锁死
+StartLimitInterval=0
 Type=simple
 ExecStartPre=-/usr/local/bin/mosctl rescue disable silent
 ExecStart=/usr/local/bin/mosdns start -d /etc/mosdns
 Restart=on-failure
-RestartSec=5s
-StartLimitInterval=60
-StartLimitBurst=3
+RestartSec=3s
 LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
@@ -415,6 +426,7 @@ EOF
 echo -e "${YELLOW}[8/8] 启动服务...${NC}"
 systemctl daemon-reload
 systemctl enable mosdns
+systemctl reset-failed mosdns
 systemctl restart mosdns
 
 if systemctl is-active --quiet mosdns; then
