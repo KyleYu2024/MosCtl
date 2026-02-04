@@ -3,9 +3,8 @@ set -e
 
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
-# 这里只定义兜底版本，脚本会自动去抓最新的
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.0"
+SCRIPT_VERSION="v0.3.1"
 GH_PROXY="" 
 # =========================================
 
@@ -29,7 +28,6 @@ fi
 
 # ================= 1.5 获取最新版本 =================
 echo -e "${YELLOW}🔍 正在检查 MosDNS 最新版本...${NC}"
-# 尝试从 GitHub API 获取最新 Tag
 LATEST_TAG=$(curl -sL https://api.github.com/repos/IrineSistiana/mosdns/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
 if [ -n "$LATEST_TAG" ]; then
@@ -54,11 +52,14 @@ echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-mosdns.conf
 echo -e "${YELLOW}[3/8] 安装 MosDNS 主程序 (${MOSDNS_VERSION})...${NC}"
 if [ ! -f "/usr/local/bin/mosdns" ]; then
     cd /tmp
-    # 使用动态获取到的 MOSDNS_VERSION 变量
-    wget -q -O mosdns.zip "${GH_PROXY}https://github.com/IrineSistiana/mosdns/releases/download/${MOSDNS_VERSION}/mosdns-linux-amd64.zip"
-    unzip -o mosdns.zip
+    # 【改动】增加 --show-progress 显示进度条
+    echo "正在下载内核文件..."
+    wget -q --show-progress -O mosdns.zip "${GH_PROXY}https://github.com/IrineSistiana/mosdns/releases/download/${MOSDNS_VERSION}/mosdns-linux-amd64.zip"
+    
+    unzip -o mosdns.zip > /dev/null 2>&1
     mv mosdns /usr/local/bin/mosdns
     chmod +x /usr/local/bin/mosdns
+    echo -e "✅ 安装完成"
 else
     echo "MosDNS 已安装，跳过下载。"
 fi
@@ -221,10 +222,19 @@ config_menu() {
     esac
 }
 
+# 【改动】增加进度条显示的规则更新函数
 update_geo_rules() {
     echo -e "\${YELLOW}⬇️  正在更新 GeoSite/GeoIP 规则数据库...\${PLAIN}"
     mkdir -p /etc/mosdns/rules
-    dl() { wget -q -O "\$1" "\${GH_PROXY}\$2" && echo "  - \$1 更新成功"; }
+    dl() { 
+        echo -e "  ☁️  正在下载 \$1 ..."
+        wget -q --show-progress -O "\$1" "\${GH_PROXY}\$2"
+        if [ \$? -eq 0 ]; then
+             echo -e "  ✅ \$1 更新成功"
+        else
+             echo -e "  ❌ \$1 下载失败"
+        fi
+    }
     dl "/etc/mosdns/rules/geosite_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt"
     dl "/etc/mosdns/rules/geoip_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"
     dl "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt"
@@ -330,7 +340,8 @@ mkdir -p /etc/mosdns/rules
 download_rule() {
     if [ ! -f "$1" ] || [ ! -s "$1" ]; then
         echo "Downloading $1..."
-        wget -q -O "$1" "${GH_PROXY}$2"
+        # 【改动】初次下载也显示进度条
+        wget -q --show-progress -O "$1" "${GH_PROXY}$2"
     fi
 }
 download_rule "/etc/mosdns/rules/geosite_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt"
