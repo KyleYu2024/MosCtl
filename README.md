@@ -17,7 +17,7 @@
 在你的 LXC 或 Linux 服务器终端执行以下命令即可安装：
 
 ```bash
-wget -qO- [https://raw.githubusercontent.com/KyleYu2024/mosctl/main/install_new.sh](https://raw.githubusercontent.com/KyleYu2024/mosctl/main/install_new.sh) | bash
+wget -qO- "https://raw.githubusercontent.com/KyleYu2024/mosctl/main/install_new.sh?v=$(date +%s)" | bash
 ```
 
 ## 🛠️ 使用说明
