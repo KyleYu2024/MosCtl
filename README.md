@@ -1,0 +1,6 @@
+##  快速安装
+进Linux或者lxc下直接使用以下命令
+
+```bash
+wget -qO- https://ghproxy.net/https://raw.githubusercontent.com/KyleYu2024/mosctl/main/install.sh | bash
+```
