@@ -7,50 +7,35 @@ api:
 
 plugins:
   # ===========================
-  # 1. 上游 DNS 定义
+  # 1. 基础插件
   # ===========================
-  
-  # [防劫持] 阿里 DNS (DoT) - 作为备用国内
-  - tag: ali
+
+  # 【缓存插件】(仅供国内流程调用，国外 FakeIP 不走缓存)
+  - tag: cache
+    type: cache
+    args:
+      size: 20480
+      lazy_cache_ttl: 86400 # 懒缓存 24小时，国内秒开核心
+      dump_file: "/etc/mosdns/cache.dump" # 持久化文件
+      dump_interval: 600
+
+  # [国内] 转发
+  - tag: forward_local
     type: forward
     args:
       upstreams:
-        - addr: "tls://223.5.5.5:853"
+        - addr: "udp://119.29.29.29" # TAG_LOCAL
           enable_pipeline: true
 
-  # [防劫持] 腾讯 DNS (DoT) - 作为主要国内
-  - tag: local
+  # [国外] 转发 (FakeIP)
+  - tag: forward_remote
     type: forward
     args:
       upstreams:
-        # 👇 [锚点] 国内 DNS 修改位置
-        - addr: "tls://119.29.29.29:853" # TAG_LOCAL
-          enable_pipeline: true
-
-  # 代理 DNS (Mihomo) - 作为主要国外
-  - tag: proxy
-    type: forward
-    args:
-      upstreams:
-        # 👇 [锚点] 国外 DNS 修改位置
         - addr: "10.10.2.252:53" # TAG_REMOTE
 
-  # Google DNS (备用)
-  - tag: google
-    type: forward
-    args:
-      upstreams:
-        - addr: "tcp://8.8.8.8:53"
-
-  # Cloudflare DNS (备用)
-  - tag: cloudflare
-    type: forward
-    args:
-      upstreams:
-        - addr: "tcp://1.1.1.1:53"
-
   # ===========================
-  # 2. 规则文件定义
+  # 2. 规则文件
   # ===========================
   
   - tag: geosite_cn
@@ -72,7 +57,6 @@ plugins:
       files:
         - "/etc/mosdns/rules/geosite_apple.txt"
 
-  # [修正] 使用无特殊字符的文件名
   - tag: geosite_no_cn
     type: domain_set
     args:
@@ -93,34 +77,19 @@ plugins:
         - "/etc/mosdns/rules/local-ptr.txt"
 
   # ===========================
-  # 3. 核心逻辑插件
+  # 3. 逻辑序列 (策略核心)
   # ===========================
 
-  - tag: forward_local
-    type: fallback
+  # [国内流] 查缓存 -> 没命中查上游 -> 写入缓存
+  - tag: cached_local_sequence
+    type: sequence
     args:
-      primary: local
-      secondary: ali
-      threshold: 500
-      always_standby: true
+      - exec: $cache           # 1. 查缓存
+      - matches: has_resp      # 2. 命中直接返回
+        exec: accept
+      - exec: $forward_local   # 3. 没命中查上游
 
-  - tag: forward_remote
-    type: fallback
-    args:
-      primary: proxy
-      secondary: google
-      threshold: 500
-      always_standby: true
-
-  - tag: forward_proxy
-    type: fallback
-    args:
-      primary: proxy
-      secondary: proxy
-      threshold: 500
-      always_standby: true
-
-  # ECS
+  # ECS 设置
   - tag: ecs_cn
     type: ecs_handler
     args:
@@ -128,7 +97,6 @@ plugins:
       preset: 119.29.29.29
       send: false
       mask4: 24
-      mask6: 48
 
   - tag: no_ecs
     type: ecs_handler
@@ -137,62 +105,52 @@ plugins:
       preset: ""
       send: false
 
-  # 国外解析流程
+  # [国外流] 直通转发 (不经过 $cache，防止 FakeIP 污染)
   - tag: forward_remote_upstream
     type: sequence
     args:
       - exec: $no_ecs
       - exec: prefer_ipv4
-      - exec: $forward_proxy
+      - exec: $forward_remote
 
-  # 响应处理
-  - tag: has_resp_sequence
-    type: sequence
-    args:
-      - matches: has_resp
-        exec: accept
-
-  # 国内 IP 过滤逻辑
+  # 国内 IP 过滤
   - tag: query_is_non_local_ip
     type: sequence
     args:
       - exec: $ecs_cn
       - exec: prefer_ipv4
-      - exec: $forward_local
+      - exec: $cached_local_sequence
       - matches: "!resp_ip $geoip_cn"
         exec: drop_resp
 
-  # Apple 域名 Fallback
+  # Apple 优化
   - tag: apple_domain_fallback
     type: fallback
     args:
       primary: query_is_non_local_ip
-      secondary: forward_local
+      secondary: cached_local_sequence
       threshold: 100
       always_standby: true
 
-  # 匹配 Apple
   - tag: query_is_apple_domain
     type: sequence
     args:
       - matches: qname $geosite_apple
         exec: $apple_domain_fallback
 
-  # 匹配 Local
+  # 匹配国内域名
   - tag: query_is_local_domain
     type: sequence
     args:
-      - exec: $ecs_cn
-      - exec: prefer_ipv4
       - matches: qname $geosite_cn
-        exec: $forward_local
+        exec: $cached_local_sequence # 走带缓存通道
 
-  # 匹配非 Local
+  # 匹配国外域名
   - tag: query_is_no_local_domain
     type: sequence
     args:
       - matches: qname $geosite_no_cn
-        exec: $forward_remote_upstream
+        exec: $forward_remote_upstream # 走无缓存通道
 
   # 拒绝名单
   - tag: query_is_reject_domain
@@ -206,7 +164,7 @@ plugins:
         exec: reject 3
 
   # ===========================
-  # 4. 主流程
+  # 4. 主入口
   # ===========================
   - tag: main_sequence
     type: sequence
@@ -222,11 +180,17 @@ plugins:
       - exec: jump has_resp_sequence
       - exec: $query_is_no_local_domain
       - exec: jump has_resp_sequence
+      # 兜底走国外(无缓存)
       - exec: $forward_remote_upstream
-      - exec: jump has_resp_sequence
+
+  - tag: has_resp_sequence
+    type: sequence
+    args:
+      - matches: has_resp
+        exec: accept
 
   # ===========================
-  # 5. 监听端口
+  # 5. 服务监听
   # ===========================
   - tag: udp_server
     type: udp_server
