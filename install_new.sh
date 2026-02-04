@@ -4,8 +4,9 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.1"
-GH_PROXY="" 
+SCRIPT_VERSION="v0.3.3"
+# 【改动】采用更稳定的 gh-proxy.com 加速源
+GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
 # 颜色
@@ -28,6 +29,7 @@ fi
 
 # ================= 1.5 获取最新版本 =================
 echo -e "${YELLOW}🔍 正在检查 MosDNS 最新版本...${NC}"
+# 尝试获取最新版本，如果失败则使用默认
 LATEST_TAG=$(curl -sL https://api.github.com/repos/IrineSistiana/mosdns/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
 if [ -n "$LATEST_TAG" ]; then
@@ -52,8 +54,8 @@ echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-mosdns.conf
 echo -e "${YELLOW}[3/8] 安装 MosDNS 主程序 (${MOSDNS_VERSION})...${NC}"
 if [ ! -f "/usr/local/bin/mosdns" ]; then
     cd /tmp
-    # 【改动】增加 --show-progress 显示进度条
     echo "正在下载内核文件..."
+    # 下载内核也走代理
     wget -q --show-progress -O mosdns.zip "${GH_PROXY}https://github.com/IrineSistiana/mosdns/releases/download/${MOSDNS_VERSION}/mosdns-linux-amd64.zip"
     
     unzip -o mosdns.zip > /dev/null 2>&1
@@ -109,6 +111,7 @@ rescue_disable() {
 sync_config() {
     echo -e "\${YELLOW}☁️  正在从 GitHub 拉取最新配置...\${PLAIN}"
     TEMP_DIR=\$(mktemp -d)
+    # 同步配置走代理
     git clone --depth 1 "\${GH_PROXY}\${REPO_URL}" "\$TEMP_DIR" >/dev/null 2>&1
     
     if [ -f "\$TEMP_DIR/templates/config.yaml" ]; then
@@ -222,12 +225,12 @@ config_menu() {
     esac
 }
 
-# 【改动】增加进度条显示的规则更新函数
 update_geo_rules() {
     echo -e "\${YELLOW}⬇️  正在更新 GeoSite/GeoIP 规则数据库...\${PLAIN}"
     mkdir -p /etc/mosdns/rules
     dl() { 
         echo -e "  ☁️  正在下载 \$1 ..."
+        # 更新规则也走代理，并显示进度条
         wget -q --show-progress -O "\$1" "\${GH_PROXY}\$2"
         if [ \$? -eq 0 ]; then
              echo -e "  ✅ \$1 更新成功"
@@ -340,7 +343,7 @@ mkdir -p /etc/mosdns/rules
 download_rule() {
     if [ ! -f "$1" ] || [ ! -s "$1" ]; then
         echo "Downloading $1..."
-        # 【改动】初次下载也显示进度条
+        # 初次下载也走代理
         wget -q --show-progress -O "$1" "${GH_PROXY}$2"
     fi
 }
