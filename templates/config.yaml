@@ -3,22 +3,19 @@ log:
   file: "/var/log/mosdns.log"
 
 api:
-  http: "0.0.0.0:8080" # MosCtl 和 Dashboard 用
+  http: "0.0.0.0:8080"
 
 plugins:
   # ====================
-  # 1. 资源定义 (双轨制核心)
+  # 1. 资源定义
   # ====================
-  
-  # [直连名单]: 云端(Git) + 本地(Manual)
   - tag: whitelist
     type: domain_set
     args:
       files:
-        - "/etc/mosdns/rules/cloud_direct.txt"  # MosCtl sync 覆盖
-        - "/etc/mosdns/rules/local_direct.txt"  # MosCtl rule add 追加
+        - "/etc/mosdns/rules/cloud_direct.txt"
+        - "/etc/mosdns/rules/local_direct.txt"
 
-  # [代理名单]: 云端(Git) + 本地(Manual)
   - tag: blocklist
     type: domain_set
     args:
@@ -26,7 +23,6 @@ plugins:
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
-  # [GeoSite CN]: 基础国内域名库
   - tag: geosite_cn
     type: domain_set
     args:
@@ -36,63 +32,67 @@ plugins:
         - "cn"
 
   # ====================
-  # 2. 上游定义
+  # 2. 基础组件
   # ====================
-
-  # [国内上游]: 阿里云 DNS
   - tag: forward_local
     type: forward
     args:
       upstreams:
         - addr: "223.5.5.5"
-          enable_ecs: true  # 开启 ECS 优化国内 CDN
+          enable_ecs: true
 
-  # [国外上游]: 指向 Mihomo (防回环)
   - tag: forward_remote
     type: forward
     args:
       upstreams:
-        - addr: "10.10.2.252:53" # 你的 Mihomo IP
-          # 不开 ECS，不负责解析，只负责转发
+        - addr: "10.10.2.252:53"
 
-  # ====================
-  # 3. 缓存定义 (策略核心)
-  # ====================
   - tag: lazy_cache
     type: cache
     args:
       size: 20480
       lazy_cache_ttl: 86400
-      # 策略：即使开启持久化，也只存国内的
 
   # ====================
-  # 4. 逻辑流水线
+  # 3. 动作序列 (关键修复点)
+  # ====================
+  
+  # [国内解析流]: 缓存 -> 国内DNS
+  # 将多个步骤封装成一个名为 'resolve_cn' 的序列
+  - tag: resolve_cn
+    type: sequence
+    args:
+      - exec: $lazy_cache
+      - exec: $forward_local
+
+  # [国外/兜底解析流]: 直接转发 Mihomo (无缓存)
+  - tag: resolve_fallback
+    type: sequence
+    args:
+      - exec: $forward_remote
+
+  # ====================
+  # 4. 主逻辑流水线
   # ====================
   - tag: main_sequence
     type: sequence
     args:
-      # A. 命中 hosts (本地劫持) -> 直接返回
       - exec: $hosts 
 
-      # B. 命中直连白名单 (Whitelist) -> 查缓存 -> 走国内 -> 存缓存
+      # 命中白名单 -> 走国内流
       - matches: 
         - qname $whitelist
-        exec: $lazy_cache
-        exec: $forward_local
-        exec: return
+        exec: $resolve_cn
 
-      # C. 命中代理黑名单 (Blocklist) -> 走 Mihomo (无缓存!)
+      # 命中黑名单 -> 走国外流
       - matches: 
         - qname $blocklist
-        exec: $forward_remote # 重点：这里不调 cache，防止 FakeIP 过期
-        exec: return
+        exec: $resolve_fallback
 
-      # D. 命中 GeoSite CN -> 查缓存 -> 走国内 -> 存缓存
+      # 命中 GeoSite CN -> 走国内流
       - matches: 
         - qname $geosite_cn
-        exec: $lazy_cache
-        exec: $forward_local
-        exec: return
+        exec: $resolve_cn
 
-      # E. 兜底 (国外流量) -> 走 Mihomo (无缓存!)
-      - exec: $forward_remote
+      # 剩下的 -> 走国外流
+      - exec: $resolve_fallback
