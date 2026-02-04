@@ -6,7 +6,7 @@ api:
   http: "0.0.0.0:8080"
 
 plugins:
-  # 1. [资源] 直连列表 (你的 Git 规则)
+  # 1. [资源] 直连列表
   - tag: whitelist
     type: domain_set
     args:
@@ -14,7 +14,7 @@ plugins:
         - "/etc/mosdns/rules/cloud_direct.txt"
         - "/etc/mosdns/rules/local_direct.txt"
 
-  # 2. [资源] 代理列表 (你的 Git 规则)
+  # 2. [资源] 代理列表
   - tag: blocklist
     type: domain_set
     args:
@@ -22,14 +22,14 @@ plugins:
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
-  # 3. [资源] 国内域名库 (关键修复: 格式改为 文件名:标签)
+  # 3. [资源] 国内域名库
   - tag: geosite_cn
     type: domain_set
     args:
       files:
         - "/etc/mosdns/geosite.dat:cn"
 
-  # 4. [基础] Hosts 解析 (防止系统解析异常)
+  # 4. [基础] Hosts 解析
   - tag: hosts
     type: hosts
     args:
@@ -61,29 +61,34 @@ plugins:
   - tag: main_sequence
     type: sequence
     args:
-      # (1) 优先查 Hosts
       - exec: $hosts
-      
-      # (2) 查缓存
       - exec: $lazy_cache
-
-      # (3) 命中白名单 -> 走阿里 -> 结束
       - matches: 
         - qname $whitelist
         exec: $forward_local
         exec: return
-
-      # (4) 命中黑名单 -> 走 Mihomo -> 结束
       - matches: 
         - qname $blocklist
         exec: $forward_remote
         exec: return
-
-      # (5) 命中 GeoSite CN -> 走阿里 -> 结束
       - matches: 
         - qname $geosite_cn
         exec: $forward_local
         exec: return
-
-      # (6) 剩下的全走 Mihomo
       - exec: $forward_remote
+
+  # =========================================
+  # 9. [入口] UDP 监听 (这里就是之前缺的！重要！)
+  # =========================================
+  - tag: udp_server
+    type: udp_server
+    args:
+      entry: main_sequence
+      listen: ":53"
+
+  # 10. [入口] TCP 监听 (可选，但建议加上)
+  - tag: tcp_server
+    type: tcp_server
+    args:
+      entry: main_sequence
+      listen: ":53"
