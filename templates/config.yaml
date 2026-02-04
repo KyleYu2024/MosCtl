@@ -6,7 +6,7 @@ api:
   http: "0.0.0.0:8080"
 
 plugins:
-  # 1. 资源：直连列表
+  # 1. [资源] 直连列表 (你的 Git 规则)
   - tag: whitelist
     type: domain_set
     args:
@@ -14,7 +14,7 @@ plugins:
         - "/etc/mosdns/rules/cloud_direct.txt"
         - "/etc/mosdns/rules/local_direct.txt"
 
-  # 2. 资源：代理列表
+  # 2. [资源] 代理列表 (你的 Git 规则)
   - tag: blocklist
     type: domain_set
     args:
@@ -22,59 +22,68 @@ plugins:
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
-  # 3. 资源：国内域名库 (这里是关键修复!)
+  # 3. [资源] 国内域名库 (关键修复: 格式改为 文件名:标签)
   - tag: geosite_cn
     type: domain_set
     args:
       files:
-        # 修正：将 :cn 直接拼在文件名后面，删除了 tags 字段
         - "/etc/mosdns/geosite.dat:cn"
 
-  # 4. 转发：国内 DNS
+  # 4. [基础] Hosts 解析 (防止系统解析异常)
+  - tag: hosts
+    type: hosts
+    args:
+      files:
+        - "/etc/hosts"
+
+  # 5. [上游] 国内 DNS (阿里)
   - tag: forward_local
     type: forward
     args:
       upstreams:
         - addr: "223.5.5.5"
 
-  # 5. 转发：国外 DNS (Mihomo)
+  # 6. [上游] 国外 DNS (Mihomo)
   - tag: forward_remote
     type: forward
     args:
       upstreams:
         - addr: "10.10.2.252:53"
 
-  # 6. 缓存
+  # 7. [缓存] 懒惰缓存
   - tag: lazy_cache
     type: cache
     args:
       size: 20480
       lazy_cache_ttl: 86400
 
-  # 7. 主流程
+  # 8. [主流程] 逻辑流水线
   - tag: main_sequence
     type: sequence
     args:
-      # (1) 查缓存
+      # (1) 优先查 Hosts
+      - exec: $hosts
+      
+      # (2) 查缓存
       - exec: $lazy_cache
 
-      # (2) 命中白名单 -> 走阿里 -> 结束
+      # (3) 命中白名单 -> 走阿里 -> 结束
       - matches: 
         - qname $whitelist
         exec: $forward_local
         exec: return
 
-      # (3) 命中黑名单 -> 走 Mihomo -> 结束
+      # (4) 命中黑名单 -> 走 Mihomo -> 结束
       - matches: 
         - qname $blocklist
         exec: $forward_remote
         exec: return
 
-      # (4) 命中 GeoSite CN -> 走阿里 -> 结束
+      # (5) 命中 GeoSite CN -> 走阿里 -> 结束
       - matches: 
         - qname $geosite_cn
         exec: $forward_local
         exec: return
 
-      # (5) 剩下的 -> 走 Mihomo
+      # (6) 剩下的全走 Mihomo
       - exec: $forward_remote
