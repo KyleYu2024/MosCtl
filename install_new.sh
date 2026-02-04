@@ -15,24 +15,14 @@ NC='\033[0m'
 
 echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (v3.6 交互修复版)...${NC}"
 
-# 1. 基础环境与日志修复
-echo -e "${YELLOW}[1/8] 环境准备 & 修复日志系统...${NC}"
+# 1. 基础环境
+echo -e "${YELLOW}[1/8] 环境准备...${NC}"
 apt update && apt install -y curl wget git nano net-tools dnsutils unzip iptables
 
 # 修复 PATH
 if ! grep -q "/usr/local/bin" ~/.bashrc; then
     echo 'export PATH=$PATH:/usr/local/bin' >> ~/.bashrc
     export PATH=$PATH:/usr/local/bin
-fi
-
-# 修复 Journald 日志
-mkdir -p /var/log/journal
-if [ -f /etc/systemd/journald.conf ]; then
-    sed -i 's/^#Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
-    sed -i 's/^Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
-    # 隐藏报错
-    systemctl restart systemd-journald >/dev/null 2>&1 || true
-    echo -e "  - 日志服务配置已更新"
 fi
 
 # 2. 清理端口
@@ -66,6 +56,7 @@ REPO_URL="${REPO_URL}"
 GH_PROXY="${GH_PROXY}"
 CONFIG_FILE="/etc/mosdns/config.yaml"
 VERSION="${MOSDNS_VERSION}"
+LOG_FILE="/var/log/mosdns.log"
 
 # 颜色
 RED='\033[0;31m'
@@ -211,6 +202,16 @@ update_geo_rules() {
     echo -e "\${GREEN}✅ 规则更新完毕！\${PLAIN}"
 }
 
+view_logs() {
+    if [ -f "\$LOG_FILE" ]; then
+        tail -n 50 -f "\$LOG_FILE"
+    else
+        echo -e "\${RED}❌ 未找到日志文件: \$LOG_FILE\${PLAIN}"
+        echo "尝试使用 journalctl..."
+        journalctl -u mosdns -n 50 -f
+    fi
+}
+
 uninstall_mosdns() {
     echo -e "\${RED}⚠️  高危操作：此操作将删除 MosDNS 服务、所有配置文件及 mosctl 工具。\${PLAIN}"
     read -p "确定要彻底卸载吗？(y/n): " confirm
@@ -222,6 +223,7 @@ uninstall_mosdns() {
         systemctl daemon-reload
         rm -rf /etc/mosdns
         rm -f /usr/local/bin/mosdns
+        rm -f /var/log/mosdns.log
         echo "nameserver 223.5.5.5" > /etc/resolv.conf
         echo -e "\${GREEN}✅ 卸载完成。再见！\${PLAIN}"
         rm -f /usr/local/bin/mosctl
@@ -261,7 +263,7 @@ show_menu() {
         4) update_geo_rules ;;
         5) rescue_enable ;;
         6) rescue_disable ;;
-        7) journalctl -u mosdns -n 50 -f ;;
+        7) view_logs ;;
         8) systemctl restart mosdns && echo -e "\${GREEN}已重启\${PLAIN}" ;;
         9) uninstall_mosdns ;;
         0) exit 0 ;;
@@ -311,48 +313,28 @@ echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
 # ================= 交互式配置环节 =================
 echo -e "${YELLOW}[6.5/8] 交互式配置向导...${NC}"
 
-# 【修正】检测是否为管道安装模式，如果是，强制从 /dev/tty 读取输入
-read_cmd="read"
-if [ ! -t 0 ]; then
-    if [ -c /dev/tty ]; then
-        # 管道模式：重定向输入
-        read -p "是否现在配置上游 DNS？(y/n) [y]: " config_confirm < /dev/tty
-    else
-        echo -e "${RED}⚠️  无法检测到终端，跳过交互配置。${NC}"
-        config_confirm="n"
-    fi
+# 强制使用终端输入，解决 pipe 问题
+# 注意：这里我们尝试从 /dev/tty 读取输入
+if [ -c /dev/tty ]; then
+    read -p "是否现在配置上游 DNS？(y/n) [y]: " config_confirm < /dev/tty
 else
-    # 普通模式
-    read -p "是否现在配置上游 DNS？(y/n) [y]: " config_confirm
+    # 极端情况下没有 tty（纯后台），跳过交互
+    config_confirm="n"
 fi
 
 config_confirm=${config_confirm:-y}
 
 if [[ "$config_confirm" == "y" ]]; then
-    # 准备读取命令
-    if [ ! -t 0 ] && [ -c /dev/tty ]; then
-        read_cmd="read < /dev/tty"
-    fi
-
-    # 1. 国内
-    if [ ! -t 0 ] && [ -c /dev/tty ]; then
-        read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns < /dev/tty
-    else
-        read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns
-    fi
     
+    # 1. 国内
+    read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns < /dev/tty
     local_dns=${local_dns:-"udp://119.29.29.29"}
     if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
     sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
     echo "  - 国内 DNS 已设置为: $local_dns"
 
     # 2. 国外
-    if [ ! -t 0 ] && [ -c /dev/tty ]; then
-        read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns < /dev/tty
-    else
-        read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns
-    fi
-    
+    read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns < /dev/tty
     remote_dns=${remote_dns:-"10.10.2.252:53"}
     sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"${remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
     echo "  - 国外 DNS 已设置为: $remote_dns"
