@@ -31,7 +31,7 @@ if [ -f /etc/systemd/journald.conf ]; then
     # 确保存储设置为自动或持久
     sed -i 's/^#Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
     sed -i 's/^Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
-    systemctl restart systemd-journald
+    systemctl restart systemd-journald || echo -e "${YELLOW}⚠️  日志服务重启失败 (LXC限制)，跳过...${NC}"
 fi
 
 # 2. 清理端口
