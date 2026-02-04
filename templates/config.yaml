@@ -7,19 +7,16 @@ api:
 
 plugins:
   # ===========================
-  # 1. 基础插件
+  # 1. 基础插件 (转发/缓存)
   # ===========================
-
-  # 【缓存插件】(仅供国内流程调用，国外 FakeIP 不走缓存)
   - tag: cache
     type: cache
     args:
       size: 20480
-      lazy_cache_ttl: 86400 # 懒缓存 24小时，国内秒开核心
-      dump_file: "/etc/mosdns/cache.dump" # 持久化文件
+      lazy_cache_ttl: 86400
+      dump_file: "/etc/mosdns/cache.dump"
       dump_interval: 600
 
-  # [国内] 转发
   - tag: forward_local
     type: forward
     args:
@@ -27,7 +24,6 @@ plugins:
         - addr: "udp://119.29.29.29" # TAG_LOCAL
           enable_pipeline: true
 
-  # [国外] 转发 (FakeIP)
   - tag: forward_remote
     type: forward
     args:
@@ -35,9 +31,8 @@ plugins:
         - addr: "10.10.2.252:53" # TAG_REMOTE
 
   # ===========================
-  # 2. 规则文件
+  # 2. 规则/匹配器
   # ===========================
-  
   - tag: geosite_cn
     type: domain_set
     args:
@@ -77,19 +72,17 @@ plugins:
         - "/etc/mosdns/rules/local-ptr.txt"
 
   # ===========================
-  # 3. 逻辑序列 (策略核心)
+  # 3. 辅助处理序列 (必须在 Main 之前定义)
   # ===========================
-
-  # [国内流] 查缓存 -> 没命中查上游 -> 写入缓存
-  - tag: cached_local_sequence
+  
+  # 【关键修复】把 has_resp_sequence 提到最前面
+  - tag: has_resp_sequence
     type: sequence
     args:
-      - exec: $cache           # 1. 查缓存
-      - matches: has_resp      # 2. 命中直接返回
+      - matches: has_resp
         exec: accept
-      - exec: $forward_local   # 3. 没命中查上游
 
-  # ECS 设置
+  # ECS 处理
   - tag: ecs_cn
     type: ecs_handler
     args:
@@ -105,7 +98,16 @@ plugins:
       preset: ""
       send: false
 
-  # [国外流] 直通转发 (不经过 $cache，防止 FakeIP 污染)
+  # 国内流 (带缓存)
+  - tag: cached_local_sequence
+    type: sequence
+    args:
+      - exec: $cache
+      - matches: has_resp
+        exec: accept
+      - exec: $forward_local
+
+  # 国外流 (无缓存)
   - tag: forward_remote_upstream
     type: sequence
     args:
@@ -113,7 +115,7 @@ plugins:
       - exec: prefer_ipv4
       - exec: $forward_remote
 
-  # 国内 IP 过滤
+  # 兜底 IP 过滤逻辑
   - tag: query_is_non_local_ip
     type: sequence
     args:
@@ -123,7 +125,7 @@ plugins:
       - matches: "!resp_ip $geoip_cn"
         exec: drop_resp
 
-  # Apple 优化
+  # Apple Fallback
   - tag: apple_domain_fallback
     type: fallback
     args:
@@ -132,25 +134,26 @@ plugins:
       threshold: 100
       always_standby: true
 
+  # 匹配 Apple
   - tag: query_is_apple_domain
     type: sequence
     args:
       - matches: qname $geosite_apple
         exec: $apple_domain_fallback
 
-  # 匹配国内域名
+  # 匹配国内
   - tag: query_is_local_domain
     type: sequence
     args:
       - matches: qname $geosite_cn
-        exec: $cached_local_sequence # 走带缓存通道
+        exec: $cached_local_sequence
 
-  # 匹配国外域名
+  # 匹配国外
   - tag: query_is_no_local_domain
     type: sequence
     args:
       - matches: qname $geosite_no_cn
-        exec: $forward_remote_upstream # 走无缓存通道
+        exec: $forward_remote_upstream
 
   # 拒绝名单
   - tag: query_is_reject_domain
@@ -164,14 +167,14 @@ plugins:
         exec: reject 3
 
   # ===========================
-  # 4. 主入口
+  # 4. 主入口 (Main Sequence)
   # ===========================
   - tag: main_sequence
     type: sequence
     args:
       - exec: $hosts
       - exec: jump has_resp_sequence
-      - exec: forward_edns0opt 8
+      # 移除了不兼容的 forward_edns0opt，改用更稳的 ecs 逻辑
       - exec: $query_is_apple_domain
       - exec: jump has_resp_sequence
       - exec: $query_is_reject_domain
@@ -180,14 +183,7 @@ plugins:
       - exec: jump has_resp_sequence
       - exec: $query_is_no_local_domain
       - exec: jump has_resp_sequence
-      # 兜底走国外(无缓存)
       - exec: $forward_remote_upstream
-
-  - tag: has_resp_sequence
-    type: sequence
-    args:
-      - matches: has_resp
-        exec: accept
 
   # ===========================
   # 5. 服务监听
