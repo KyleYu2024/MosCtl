@@ -4,7 +4,6 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 MOSDNS_VERSION="v5.3.3"
-# GH_PROXY="https://ghproxy.net/"
 GH_PROXY="" 
 # =========================================
 
@@ -14,15 +13,25 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (v3.0 菜单增强版)...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (v3.1 菜单增强版)...${NC}"
 
-# 1. 基础环境与 PATH 修复
-echo -e "${YELLOW}[1/8] 环境准备 & PATH 修复...${NC}"
+# 1. 基础环境与日志修复
+echo -e "${YELLOW}[1/8] 环境准备 & 修复日志系统...${NC}"
 apt update && apt install -y curl wget git nano net-tools dnsutils unzip iptables
 
+# 修复 PATH
 if ! grep -q "/usr/local/bin" ~/.bashrc; then
     echo 'export PATH=$PATH:/usr/local/bin' >> ~/.bashrc
     export PATH=$PATH:/usr/local/bin
+fi
+
+# 修复 Journald 日志 (解决 No journal files found)
+mkdir -p /var/log/journal
+if [ -f /etc/systemd/journald.conf ]; then
+    # 确保存储设置为自动或持久
+    sed -i 's/^#Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
+    sed -i 's/^Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
+    systemctl restart systemd-journald
 fi
 
 # 2. 清理端口
@@ -46,14 +55,15 @@ else
     echo "MosDNS 已安装，跳过下载。"
 fi
 
-# 4. 生成 Mosctl 管理工具 (集成菜单、卸载、更新规则)
-echo -e "${YELLOW}[4/8] 生成 mosctl (v3.0)...${NC}"
+# 4. 生成 Mosctl 管理工具
+echo -e "${YELLOW}[4/8] 生成 mosctl (v3.1)...${NC}"
 cat > /usr/local/bin/mosctl <<EOF
 #!/bin/bash
-# MosDNS 管理工具 v3.0
+# MosDNS 管理工具 v3.1
 RESCUE_DNS="223.5.5.5"
 REPO_URL="${REPO_URL}"
 GH_PROXY="${GH_PROXY}"
+CONFIG_FILE="/etc/mosdns/config.yaml"
 
 # 颜色
 RED='\033[0;31m'
@@ -110,69 +120,95 @@ sync_config() {
     fi
 }
 
+change_upstream() {
+    local type=\$1
+    local tag_marker=\$2
+    local default_proto=\$3
+    
+    echo -e "\n\${YELLOW}📝 修改 [\$type] DNS 上游\${PLAIN}"
+    echo "当前配置行:"
+    grep "\$tag_marker" \$CONFIG_FILE | grep -v "grep"
+    echo
+    echo -e "请输入新的地址 (例如: \${GREEN}223.5.5.5\${PLAIN} 或 \${GREEN}10.0.0.1:53\${PLAIN})"
+    echo -e "也可以输入完整协议 (例如: \${GREEN}https://1.1.1.1/dns-query\${PLAIN})"
+    read -p "地址: " new_ip
+    
+    if [ -z "\$new_ip" ]; then echo "已取消"; return; fi
+    
+    # 智能补全协议
+    if [[ "\$new_ip" != *"://"* ]]; then
+        new_ip="\${default_proto}://\${new_ip}"
+    fi
+    
+    echo "正在将上游修改为: \$new_ip"
+    
+    # 使用 sed 保留缩进并替换内容 (依赖 config.yaml 中的 # TAG_xxx 锚点)
+    sed -i "s|\(.*\)- addr:.*\$tag_marker|\1- addr: \"\$new_ip\" \$tag_marker|" \$CONFIG_FILE
+    
+    echo "🔄 重启服务生效..."
+    if systemctl restart mosdns; then
+        echo -e "\${GREEN}✅ 修改成功！\${PLAIN}"
+    else
+        echo -e "\${RED}❌ 修改失败，服务无法启动，请检查输入格式。\${PLAIN}"
+    fi
+}
+
+config_menu() {
+    clear
+    echo -e "\${GREEN}==============================\${PLAIN}"
+    echo -e "\${GREEN}    📝 修改 DNS 上游配置     \${PLAIN}"
+    echo -e "\${GREEN}==============================\${PLAIN}"
+    echo -e "  1. 🇨🇳 修改国内 DNS (默认 TLS/UDP)"
+    echo -e "  2. 🌍 修改国外 DNS (默认 TLS/Proxy)"
+    echo -e "  0. 🔙 返回主菜单"
+    echo -e "\${GREEN}==============================\${PLAIN}"
+    read -p "请选择 [0-2]: " sub_choice
+    
+    case "\$sub_choice" in
+        1) change_upstream "国内" "# TAG_LOCAL" "udp" ;;
+        2) change_upstream "国外" "# TAG_REMOTE" "tls" ;;
+        0) return ;;
+        *) echo -e "\${RED}无效选择\${PLAIN}" ;;
+    esac
+}
+
 update_rules() {
     echo -e "\${YELLOW}⬇️  正在更新 GeoSite/GeoIP 规则数据库...\${PLAIN}"
     mkdir -p /etc/mosdns/rules
-    # 定义下载函数
     dl() { wget -q -O "\$1" "\${GH_PROXY}\$2" && echo "  - \$1 更新成功"; }
-    
     dl "/etc/mosdns/rules/geosite_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt"
     dl "/etc/mosdns/rules/geoip_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"
     dl "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt"
     dl "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
-    
-    echo "🔄 重启服务应用规则..."
     systemctl restart mosdns
     echo -e "\${GREEN}✅ 规则更新完毕！\${PLAIN}"
-}
-
-modify_config() {
-    echo -e "\${YELLOW}📝 即将打开编辑器 (Nano)...\${PLAIN}"
-    echo "请修改后按 Ctrl+O 保存，Ctrl+X 退出。"
-    echo "修改重点：寻找 'upstream' 关键字修改 IP 地址。"
-    read -p "按回车键继续..."
-    nano /etc/mosdns/config.yaml
-    echo "🔄 重启服务..."
-    if systemctl restart mosdns; then
-        echo -e "\${GREEN}✅ 配置已更新并生效。\${PLAIN}"
-    else
-        echo -e "\${RED}❌ 服务启动失败，请检查配置文件格式！\${PLAIN}"
-    fi
 }
 
 uninstall_mosdns() {
     echo -e "\${RED}⚠️  高危操作：即将彻底卸载 MosDNS！\${PLAIN}"
     read -p "确定要继续吗？(y/n): " confirm
     if [ "\$confirm" == "y" ]; then
-        echo "正在停止服务..."
         systemctl stop mosdns
         systemctl disable mosdns
         rm -f /etc/systemd/system/mosdns.service
         rm -f /etc/systemd/system/mosdns-rescue.service
         systemctl daemon-reload
-        
-        echo "正在删除文件..."
         rm -rf /etc/mosdns
         rm -f /usr/local/bin/mosdns
-        
-        echo "恢复 DNS 为 223.5.5.5..."
         echo "nameserver 223.5.5.5" > /etc/resolv.conf
-        
-        echo -e "\${GREEN}✅ 卸载完成。再见！\${PLAIN}"
-        rm -f /usr/local/bin/mosctl # 自杀
+        echo -e "\${GREEN}✅ 卸载完成。\${PLAIN}"
+        rm -f /usr/local/bin/mosctl
         exit 0
-    else
-        echo "已取消。"
     fi
 }
 
 show_menu() {
     clear
     echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e "\${GREEN}   MosDNS 管理面板 (v3.0)   \${PLAIN}"
+    echo -e "\${GREEN}   MosDNS 管理面板 (v3.1)   \${PLAIN}"
     echo -e "\${GREEN}==============================\${PLAIN}"
     echo -e "  1. 🔄  同步配置 (Git Pull)"
-    echo -e "  2. 📝  修改配置 (手动编辑)"
+    echo -e "  2. 📝  修改上游 DNS (填空模式)"
     echo -e "  3. ⬇️   更新规则 (Geo/IP库)"
     echo -e "  4. 🚑  开启救援模式 (Rescue)"
     echo -e "  5. ♻️   关闭救援模式 (Normal)"
@@ -187,7 +223,7 @@ show_menu() {
 
     case "\$choice" in
         1) sync_config ;;
-        2) modify_config ;;
+        2) config_menu ;;
         3) update_rules ;;
         4) rescue_enable ;;
         5) rescue_disable ;;
@@ -198,15 +234,15 @@ show_menu() {
         *) echo -e "\${RED}无效选择\${PLAIN}" ;;
     esac
     
-    # 操作完暂停一下，除非是看日志或退出
-    if [ "\$choice" != "6" ] && [ "\$choice" != "0" ] && [ "\$choice" != "8" ]; then
+    if [ "\$choice" != "6" ] && [ "\$choice" != "0" ] && [ "\$choice" != "8" ] && [ "\$choice" != "2" ]; then
         echo
         read -p "按回车键返回主菜单..."
+        show_menu
+    elif [ "\$choice" == "2" ]; then
         show_menu
     fi
 }
 
-# --- 命令行路由 ---
 if [ \$# -gt 0 ]; then
     case "\$1" in
         rescue)
@@ -236,7 +272,7 @@ download_rule "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubuserconte
 download_rule "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
 touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt}
 
-# 6. 初次配置
+# 6. 初次配置 (确保拉取到带 Tag 的 Config)
 echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
 /usr/local/bin/mosctl sync
 
@@ -276,7 +312,7 @@ systemctl enable mosdns
 systemctl restart mosdns
 
 if systemctl is-active --quiet mosdns; then
-    echo -e "${GREEN}✅ 部署完成！MosDNS 管理工具已升级 (v3.0)${NC}"
+    echo -e "${GREEN}✅ 部署完成！(v3.1)${NC}"
     echo -e "👉 输入 ${GREEN}mosctl${NC} 即可打开管理菜单"
 else
     echo -e "${RED}❌ 启动失败，请检查日志${NC}"
