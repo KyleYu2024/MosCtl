@@ -238,7 +238,7 @@ show_menu() {
     if [ "\$status_raw" == "active" ]; then status_text="\${GREEN}🟢 运行中\${PLAIN}"; else status_text="\${RED}🔴 未运行\${PLAIN}"; fi
 
     echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e "\${GREEN}   MosDNS 管理面板 (v3.6)   \${PLAIN}"
+    echo -e "\${GREEN}   MosCtl 管理面板   \${PLAIN}"
     echo -e "\${GREEN}==============================\${PLAIN}"
     echo -e " 内核版本: \${GREEN}\${VERSION}\${PLAIN} | 状态: \$status_text"
     echo -e "\${GREEN}==============================\${PLAIN}"
@@ -377,7 +377,7 @@ systemctl enable mosdns
 systemctl restart mosdns
 
 if systemctl is-active --quiet mosdns; then
-    echo -e "${GREEN}✅ 部署完成！(v3.6)${NC}"
+    echo -e "${GREEN}✅ 部署完成！${NC}"
     echo -e "👉 输入 ${GREEN}mosctl${NC} 即可打开管理菜单"
 else
     echo -e "${RED}❌ 启动失败，请检查日志${NC}"
