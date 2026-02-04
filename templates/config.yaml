@@ -6,77 +6,226 @@ api:
   http: "0.0.0.0:8080"
 
 plugins:
-  # 1. 资源定义
-  - tag: whitelist
-    type: domain_set
-    args:
-      files:
-        - "/etc/mosdns/rules/cloud_direct.txt"
-        - "/etc/mosdns/rules/local_direct.txt"
-
-  - tag: blocklist
-    type: domain_set
-    args:
-      files:
-        - "/etc/mosdns/rules/cloud_proxy.txt"
-        - "/etc/mosdns/rules/local_proxy.txt"
-
-  - tag: geosite_cn
-    type: domain_set
-    args:
-      files:
-        - "/etc/mosdns/rules/geosite_cn.txt"
-
-  # 2. [关键修改] 国内转发改为 DoH，防劫持
-  - tag: forward_local
+  # ===========================
+  # 1. 上游 DNS 定义
+  # ===========================
+  
+  # [防劫持] 阿里 DNS (DoT)
+  - tag: ali
     type: forward
     args:
       upstreams:
-        - addr: "https://223.5.5.5/dns-query"
+        - addr: "tls://223.5.5.5:853"
+          enable_pipeline: true
 
-  # 3. 国外转发 (保持不变)
-  - tag: forward_remote
+  # [防劫持] 腾讯 DNS (DoT)
+  - tag: local
+    type: forward
+    args:
+      upstreams:
+        - addr: "tls://119.29.29.29:853"
+          enable_pipeline: true
+
+  # 代理 DNS (Mihomo)
+  - tag: proxy
     type: forward
     args:
       upstreams:
         - addr: "10.10.2.252:53"
 
-  - tag: lazy_cache
-    type: cache
+  # Google DNS (备用)
+  - tag: google
+    type: forward
     args:
-      size: 20480
-      lazy_cache_ttl: 86400
+      upstreams:
+        - addr: "tcp://8.8.8.8:53"
 
-  # 4. 动作子序列
-  - tag: resolve_cn
+  # Cloudflare DNS (备用)
+  - tag: cloudflare
+    type: forward
+    args:
+      upstreams:
+        - addr: "tcp://1.1.1.1:53"
+
+  # ===========================
+  # 2. 规则文件定义
+  # ===========================
+  
+  - tag: geosite_cn
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geosite_cn.txt"
+        - "/etc/mosdns/rules/force-cn.txt"
+
+  - tag: geoip_cn
+    type: ip_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geoip_cn.txt"
+
+  - tag: geosite_apple
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geosite_apple.txt"
+
+  # [修正] 使用无特殊字符的文件名
+  - tag: geosite_no_cn
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geosite_no_cn.txt"
+        - "/etc/mosdns/rules/force-nocn.txt"
+
+  - tag: hosts
+    type: hosts
+    args:
+      files:
+        - "/etc/mosdns/rules/hosts.txt"
+
+  - tag: local_ptr
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/local-ptr.txt"
+
+  # ===========================
+  # 3. 核心逻辑插件
+  # ===========================
+
+  - tag: forward_local
+    type: fallback
+    args:
+      primary: local
+      secondary: ali
+      threshold: 500
+      always_standby: true
+
+  - tag: forward_remote
+    type: fallback
+    args:
+      primary: proxy
+      secondary: google
+      threshold: 500
+      always_standby: true
+
+  - tag: forward_proxy
+    type: fallback
+    args:
+      primary: proxy
+      secondary: proxy
+      threshold: 500
+      always_standby: true
+
+  # ECS
+  - tag: ecs_cn
+    type: ecs_handler
+    args:
+      forward: false
+      preset: 119.29.29.29
+      send: false
+      mask4: 24
+      mask6: 48
+
+  - tag: no_ecs
+    type: ecs_handler
+    args:
+      forward: false
+      preset: ""
+      send: false
+
+  # 国外解析流程
+  - tag: forward_remote_upstream
     type: sequence
     args:
+      - exec: $no_ecs
+      - exec: prefer_ipv4
+      - exec: $forward_proxy
+
+  # 响应处理
+  - tag: has_resp_sequence
+    type: sequence
+    args:
+      - matches: has_resp
+        exec: accept
+
+  # 国内 IP 过滤逻辑
+  - tag: query_is_non_local_ip
+    type: sequence
+    args:
+      - exec: $ecs_cn
+      - exec: prefer_ipv4
       - exec: $forward_local
-      - exec: return
+      - matches: "!resp_ip $geoip_cn"
+        exec: drop_resp
 
-  - tag: resolve_fallback
+  # Apple 域名 Fallback
+  - tag: apple_domain_fallback
+    type: fallback
+    args:
+      primary: query_is_non_local_ip
+      secondary: forward_local
+      threshold: 100
+      always_standby: true
+
+  # 匹配 Apple
+  - tag: query_is_apple_domain
     type: sequence
     args:
-      - exec: $forward_remote
-      - exec: return
+      - matches: qname $geosite_apple
+        exec: $apple_domain_fallback
 
-  # 5. 主流程
+  # 匹配 Local
+  - tag: query_is_local_domain
+    type: sequence
+    args:
+      - exec: $ecs_cn
+      - exec: prefer_ipv4
+      - matches: qname $geosite_cn
+        exec: $forward_local
+
+  # 匹配非 Local
+  - tag: query_is_no_local_domain
+    type: sequence
+    args:
+      - matches: qname $geosite_no_cn
+        exec: $forward_remote_upstream
+
+  # 拒绝名单
+  - tag: query_is_reject_domain
+    type: sequence
+    args:
+      - matches:
+        - qtype 12
+        - qname $local_ptr
+        exec: reject 3
+      - matches: qtype 65
+        exec: reject 3
+
+  # ===========================
+  # 4. 主流程
+  # ===========================
   - tag: main_sequence
     type: sequence
     args:
-      - exec: $lazy_cache
-      - matches: 
-        - qname $whitelist
-        exec: $resolve_cn
-      - matches: 
-        - qname $blocklist
-        exec: $resolve_fallback
-      - matches: 
-        - qname $geosite_cn
-        exec: $resolve_cn
-      - exec: $resolve_fallback
+      - exec: $hosts
+      - exec: jump has_resp_sequence
+      - exec: forward_edns0opt 8
+      - exec: $query_is_apple_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_reject_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_local_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_no_local_domain
+      - exec: jump has_resp_sequence
+      - exec: $forward_remote_upstream
+      - exec: jump has_resp_sequence
 
-  # 6. 监听端口
+  # ===========================
+  # 5. 监听端口
+  # ===========================
   - tag: udp_server
     type: udp_server
     args:
