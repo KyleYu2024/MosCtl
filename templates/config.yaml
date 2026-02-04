@@ -21,7 +21,7 @@ plugins:
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
-  # [重要] 这里现在指向的是纯文本规则
+  # [重要] 这里指向纯文本规则
   - tag: geosite_cn
     type: domain_set
     args:
@@ -60,7 +60,7 @@ plugins:
       - exec: $forward_remote
       - exec: return
 
-  # 4. 主流程 (已移除 hosts 插件)
+  # 4. 主流程
   - tag: main_sequence
     type: sequence
     args:
