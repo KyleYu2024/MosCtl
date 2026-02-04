@@ -34,6 +34,14 @@ plugins:
   # ====================
   # 2. 基础组件
   # ====================
+  
+  # [补全缺失的 hosts 插件]
+  - tag: hosts
+    type: hosts
+    args:
+      files:
+        - "/etc/hosts"
+
   - tag: forward_local
     type: forward
     args:
@@ -54,18 +62,15 @@ plugins:
       lazy_cache_ttl: 86400
 
   # ====================
-  # 3. 动作序列 (关键修复点)
+  # 3. 动作序列
   # ====================
   
-  # [国内解析流]: 缓存 -> 国内DNS
-  # 将多个步骤封装成一个名为 'resolve_cn' 的序列
   - tag: resolve_cn
     type: sequence
     args:
       - exec: $lazy_cache
       - exec: $forward_local
 
-  # [国外/兜底解析流]: 直接转发 Mihomo (无缓存)
   - tag: resolve_fallback
     type: sequence
     args:
@@ -79,20 +84,16 @@ plugins:
     args:
       - exec: $hosts 
 
-      # 命中白名单 -> 走国内流
       - matches: 
         - qname $whitelist
         exec: $resolve_cn
 
-      # 命中黑名单 -> 走国外流
       - matches: 
         - qname $blocklist
         exec: $resolve_fallback
 
-      # 命中 GeoSite CN -> 走国内流
       - matches: 
         - qname $geosite_cn
         exec: $resolve_cn
 
-      # 剩下的 -> 走国外流
       - exec: $resolve_fallback
