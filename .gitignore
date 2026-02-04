@@ -2,7 +2,7 @@
 .DS_Store
 
 # 编译生成的文件
-mosctl
+/mosctl
 mosctl-linux-amd64
 mosctl-linux-arm64
 mosdns
