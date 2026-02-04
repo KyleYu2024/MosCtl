@@ -22,16 +22,15 @@ plugins:
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
-  # 3. 资源：国内域名库
+  # 3. 资源：国内域名库 (这里是关键修复!)
   - tag: geosite_cn
     type: domain_set
     args:
       files:
-        - "/etc/mosdns/geosite.dat"
-      tags:
-        - "cn"
+        # 修正：将 :cn 直接拼在文件名后面，删除了 tags 字段
+        - "/etc/mosdns/geosite.dat:cn"
 
-  # 4. 转发：国内 DNS (阿里)
+  # 4. 转发：国内 DNS
   - tag: forward_local
     type: forward
     args:
@@ -52,7 +51,7 @@ plugins:
       size: 20480
       lazy_cache_ttl: 86400
 
-  # 7. 主流程 (简单粗暴，不再嵌套)
+  # 7. 主流程
   - tag: main_sequence
     type: sequence
     args:
@@ -77,5 +76,5 @@ plugins:
         exec: $forward_local
         exec: return
 
-      # (5) 剩下的全走 Mihomo
+      # (5) 剩下的 -> 走 Mihomo
       - exec: $forward_remote
