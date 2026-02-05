@@ -300,22 +300,53 @@ view_logs() {
 uninstall_mosdns() {
     # 修复：强制从 tty 读取
     if [ -t 0 ]; then
-        read -p "确定卸载吗？(y/n): " confirm
+        read -p "⚠️  高危操作：确定要彻底卸载 MosDNS 及面板吗？(y/n): " confirm
     else
-        echo -n "确定卸载吗？(y/n): "
+        echo -n "⚠️  高危操作：确定要彻底卸载 MosDNS 及面板吗？(y/n): "
         read confirm < /dev/tty
     fi
     
-    if [ "\$confirm" == "y" ]; then
-        systemctl stop mosdns
-        systemctl disable mosdns
-        rm -f /etc/systemd/system/mosdns*
+    if [ "$confirm" == "y" ]; then
+        echo "⏳ 正在停止服务..."
+        # 停止主服务和救援服务
+        systemctl stop mosdns 2>/dev/null || true
+        systemctl stop mosdns-rescue 2>/dev/null || true
+        # 停止可能存在的 Web 后端服务
+        systemctl stop mosdns-web 2>/dev/null || true
+        
+        echo "🚫 禁用服务..."
+        systemctl disable mosdns 2>/dev/null || true
+        systemctl disable mosdns-rescue 2>/dev/null || true
+        systemctl disable mosdns-web 2>/dev/null || true
+        
+        echo "🗑️  清理文件..."
+        # 删除 Systemd 单元文件
+        rm -f /etc/systemd/system/mosdns.service
+        rm -f /etc/systemd/system/mosdns-rescue.service
+        rm -f /etc/systemd/system/mosdns-web.service
+        
+        # 删除内核转发配置 (补漏)
+        rm -f /etc/sysctl.d/99-mosdns.conf
+        
+        # 重载 Systemd
         systemctl daemon-reload
-        rm -rf /etc/mosdns /usr/local/bin/mosdns /var/log/mosdns.log
+        
+        # 删除程序和配置目录
+        rm -rf /etc/mosdns
+        rm -f /usr/local/bin/mosdns
+        rm -f /usr/local/bin/mosdns-web  # 补漏：删除后端
+        rm -f /var/log/mosdns.log
+        
+        # 清理 Crontab
         crontab -l 2>/dev/null | grep -v "mosctl update" | crontab -
+        
+        # 恢复 DNS (防止卸载后断网)
         echo "nameserver 223.5.5.5" > /etc/resolv.conf
+        
+        # 最后删除自己
         rm -f /usr/local/bin/mosctl
-        echo -e "\${GREEN}✅ 卸载完成。\${PLAIN}"
+        
+        echo -e "${GREEN}✅ 卸载完成。系统已清理干净。${NC}"
         exit 0
     fi
 }
