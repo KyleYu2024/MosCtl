@@ -3,8 +3,8 @@ set -e
 
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
-DEFAULT_MOSDNS_VERSION="v5.3.4"
-SCRIPT_VERSION="v1.0.0"
+DEFAULT_MOSDNS_VERSION="v5.3.3"
+SCRIPT_VERSION="v0.3.1"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -18,7 +18,6 @@ echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 正式版
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/8] 环境准备...${NC}"
-# 【改动】新增 cron 依赖，确保定时任务可用
 apt update && apt install -y curl wget git nano net-tools dnsutils unzip iptables cron
 
 # 修复 PATH
@@ -113,28 +112,43 @@ sync_config() {
     
     if [ -f "\$TEMP_DIR/templates/config.yaml" ]; then
         echo "⚙️  应用新配置..."
-        cp /etc/mosdns/config.yaml /etc/mosdns/config.yaml.bak
+        
+        # 【关键改动】先判断旧配置是否存在，存在才备份
+        if [ -f "/etc/mosdns/config.yaml" ]; then
+            cp /etc/mosdns/config.yaml /etc/mosdns/config.yaml.bak
+        fi
+        
+        # 覆盖/写入新配置
+        mkdir -p /etc/mosdns
         cp "\$TEMP_DIR/templates/config.yaml" /etc/mosdns/config.yaml
-        
-        echo "🔄 重启服务..."
-        systemctl reset-failed mosdns
-        
-        if systemctl restart mosdns; then
-            echo -e "\${GREEN}✅ 同步成功！\${PLAIN}"
-            rm -rf "\$TEMP_DIR"
+        rm -rf "\$TEMP_DIR"
+
+        # 【关键改动】判断服务是否已存在/运行，再决定是否重启
+        # 如果是安装阶段(systemd还没建)，则直接跳过重启，避免报错
+        if systemctl list-units --full -all | grep -q "mosdns.service"; then
+            echo "🔄 重启服务..."
+            systemctl reset-failed mosdns 2>/dev/null
+            if systemctl restart mosdns; then
+                echo -e "\${GREEN}✅ 同步成功！\${PLAIN}"
+            else
+                echo -e "\${RED}❌ 启动失败！自动回滚...\${PLAIN}"
+                echo "--- 错误日志 (最后10行) ---"
+                tail -n 10 \$LOG_FILE
+                echo "-------------------------"
+                
+                # 回滚逻辑
+                if [ -f "/etc/mosdns/config.yaml.bak" ]; then
+                    mv /etc/mosdns/config.yaml.bak /etc/mosdns/config.yaml
+                    systemctl reset-failed mosdns 2>/dev/null
+                    systemctl restart mosdns
+                fi
+            fi
         else
-            echo -e "\${RED}❌ 启动失败！自动回滚...\${PLAIN}"
-            echo "--- 错误日志 (最后10行) ---"
-            tail -n 10 \$LOG_FILE
-            echo "-------------------------"
-            
-            mv /etc/mosdns/config.yaml.bak /etc/mosdns/config.yaml
-            systemctl reset-failed mosdns
-            systemctl restart mosdns
-            rm -rf "\$TEMP_DIR"
+            # 这里的 echo 是给全新安装看的
+            echo -e "\${GREEN}✅ 初始配置已写入（等待服务启动）。\${PLAIN}"
         fi
     else
-        echo -e "\${RED}❌ 拉取失败\${PLAIN}"
+        echo -e "\${RED}❌ 拉取失败，请检查网络\${PLAIN}"
         rm -rf "\$TEMP_DIR"
     fi
 }
@@ -161,7 +175,7 @@ change_upstream() {
     sed -i "s|\(.*\)- addr:.*\$tag_marker|\1- addr: \"\$new_ip\" \$tag_marker|" \$CONFIG_FILE
     
     echo "🔄 重启服务生效..."
-    systemctl reset-failed mosdns
+    systemctl reset-failed mosdns 2>/dev/null
     if systemctl restart mosdns; then
         echo -e "\${GREEN}✅ 修改成功！\${PLAIN}"
     else
@@ -177,7 +191,7 @@ edit_rule() {
     echo "按 Ctrl+O 保存，Ctrl+X 退出。"
     read -p "按回车键开始编辑..."
     nano "\$file"
-    systemctl reset-failed mosdns
+    systemctl reset-failed mosdns 2>/dev/null
     systemctl restart mosdns
     echo -e "\${GREEN}✅ 规则已应用。\${PLAIN}"
 }
@@ -186,11 +200,11 @@ flush_cache() {
     echo -e "\n\${YELLOW}🧹 正在清空 DNS 缓存...\${PLAIN}"
     if [ -f "\$CACHE_FILE" ]; then
         rm -f "\$CACHE_FILE"
-        systemctl reset-failed mosdns
+        systemctl reset-failed mosdns 2>/dev/null
         systemctl restart mosdns
         echo -e "\${GREEN}✅ 缓存已清空并重建！\${PLAIN}"
     else
-        systemctl reset-failed mosdns
+        systemctl reset-failed mosdns 2>/dev/null
         systemctl restart mosdns
         echo -e "\${GREEN}✅ 缓存文件不存在，已重启服务。\${PLAIN}"
     fi
@@ -251,7 +265,7 @@ update_geo_rules() {
     dl "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt"
     dl "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
     
-    systemctl reset-failed mosdns
+    systemctl reset-failed mosdns 2>/dev/null
     systemctl restart mosdns
     echo -e "\${GREEN}✅ 规则更新完毕！\${PLAIN}"
 }
@@ -343,7 +357,9 @@ if [ \$# -gt 0 ]; then
             if [ "\$2" == "enable" ]; then rescue_enable; elif [ "\$2" == "disable" ]; then rescue_disable; else echo "Usage: mosctl rescue {enable|disable}"; fi ;;
         sync) sync_config ;;
         update) update_geo_rules ;;
-        *) echo "Usage: mosctl [rescue|sync|update]" ;;
+        flush) flush_cache ;;
+        version) echo "${KERNEL_VERSION}" ;;
+        *) echo "Usage: mosctl [rescue|sync|update|flush|version]" ;;
     esac
 else
     show_menu
