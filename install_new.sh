@@ -4,7 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v1.0.7"
+SCRIPT_VERSION="v0.3.7"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
