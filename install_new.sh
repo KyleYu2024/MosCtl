@@ -4,7 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.7"
+SCRIPT_VERSION="v0.3.8"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -178,15 +178,12 @@ change_upstream() {
 
 change_cache_ttl() {
     local new_ttl=\$1
-    # 交互式处理：如果没传参数，就问用户
     if [ -z "\$new_ttl" ]; then
         echo -e "\n\${YELLOW}⏱️  修改 DNS 缓存时间 (TTL)\${PLAIN}"
         echo "当前配置: \$(grep "lazy_cache_ttl" \$CONFIG_FILE | awk '{print \$2}') 秒"
         read -p "请输入新的缓存时间 (秒): " new_ttl
     fi
-    
     if [[ ! "\$new_ttl" =~ ^[0-9]+$ ]]; then echo -e "\${RED}❌ 错误：TTL 必须是数字\${PLAIN}"; return 1; fi
-    
     echo "修改缓存时间为: \${new_ttl} 秒"
     sed -i "s/lazy_cache_ttl: [0-9]*/lazy_cache_ttl: \${new_ttl}/" \$CONFIG_FILE
     systemctl restart mosdns && echo -e "\${GREEN}✅ 缓存时间已修改！\${PLAIN}"
@@ -242,6 +239,25 @@ rules_menu() {
     esac
 }
 
+# ⚠️ 之前漏掉的 config_menu 函数补回来了！
+config_menu() {
+    clear
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    echo -e "\${GREEN}    ⚙️  修改 DNS 上游配置     \${PLAIN}"
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    echo -e "  1. 🇨🇳 修改国内 DNS (默认补全 udp://)"
+    echo -e "  2. 🌍 修改国外 DNS (不强制补全)"
+    echo -e "  0. 🔙 返回主菜单"
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    read -p "请选择: " sub_choice
+    case "\$sub_choice" in
+        1) change_upstream "国内" "# TAG_LOCAL" "udp" ;;
+        2) change_upstream "国外" "# TAG_REMOTE" "" ;;
+        0) return ;;
+        *) echo -e "\${RED}无效\${PLAIN}" ;;
+    esac
+}
+
 update_geo_rules() {
     echo -e "\${YELLOW}⬇️  正在更新 GeoSite/GeoIP...\${PLAIN}"
     mkdir -p /etc/mosdns/rules
@@ -294,9 +310,9 @@ show_menu() {
     echo -e "   7. 📊  查看运行日志"
     echo -e "   8. 🧹  清空 DNS 缓存"
     echo -e "   9. ▶️  重启服务"
-    echo -e "  10. 🗑️  彻底卸载"
-    echo -e "  11. 🩺  DNS 解析测试"
-    echo -e "  12. ⏱️  设置缓存 TTL"
+    echo -e "  10. 🩺  DNS 解析测试"
+    echo -e "  11. ⏱️  设置缓存 TTL"
+    echo -e "  12. 🗑️  彻底卸载"
     echo -e "   0. 🚪  退出"
     echo -e "\${GREEN}=====================================\${PLAIN}"
     echo
@@ -312,13 +328,13 @@ show_menu() {
         7) view_logs ;;
         8) flush_cache ;;
         9) systemctl restart mosdns && echo -e "\${GREEN}已重启\${PLAIN}" ;;
-        10) uninstall_mosdns ;;
-        11) run_test; read -p "按回车继续..." ;;
-        12) change_cache_ttl ;;
+        10) run_test; read -p "按回车继续..." ;;
+        11) change_cache_ttl ;;
+        12) uninstall_mosdns ;;
         0) exit 0 ;;
         *) echo -e "\${RED}无效\${PLAIN}" ;;
     esac
-    if [[ "\$choice" != "7" && "\$choice" != "11" ]]; then read -p "按回车键返回..."; show_menu; fi
+    if [[ "\$choice" != "7" && "\$choice" != "10" ]]; then read -p "按回车键返回..."; show_menu; fi
 }
 
 if [ \$# -gt 0 ]; then
@@ -339,7 +355,8 @@ fi
 EOF
 chmod +x /usr/local/bin/mosctl
 
-# 5. 下载文件 (修复了 if 展开问题)
+# 5. 下载规则
+echo -e "${YELLOW}[5/8] 检查/下载规则文件...${NC}"
 mkdir -p /etc/mosdns/rules
 download_rule() {
     if [ ! -f "$1" ]; then
@@ -357,22 +374,37 @@ touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt}
 echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
 /usr/local/bin/mosctl sync
 
-# ================= 交互式配置环节 (修复了 bash syntax error) =================
+# ================= 交互式配置环节 (确保从 tty 读取) =================
 echo -e "${YELLOW}[6.5/8] 交互式配置向导...${NC}"
 config_confirm="n"
-if [ -c /dev/tty ]; then
+# 强制从终端读取，即使是在 pipe 模式下
+if [ -t 0 ]; then
     read -p "是否现在配置上游 DNS？(y/n) [y]: " input_c
+    config_confirm="${input_c:-y}"
+elif [ -c /dev/tty ]; then
+    read -p "是否现在配置上游 DNS？(y/n) [y]: " input_c < /dev/tty
     config_confirm="${input_c:-y}"
 fi
 
 if [[ "$config_confirm" == "y" ]]; then
-    read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns
+    # 强制从 /dev/tty 读取输入
+    if [ -t 0 ]; then
+        read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns
+    else
+        echo -n "请输入国内 DNS (回车默认 udp://119.29.29.29): "
+        read local_dns < /dev/tty
+    fi
     local_dns=${local_dns:-"udp://119.29.29.29"}
     if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
     sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
     echo "  - 国内 DNS 已设置为: $local_dns"
 
-    read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns
+    if [ -t 0 ]; then
+        read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns
+    else
+        echo -n "请输入国外 DNS (回车默认 10.10.2.252:53): "
+        read remote_dns < /dev/tty
+    fi
     remote_dns=${remote_dns:-"10.10.2.252:53"}
     sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"${remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
     echo "  - 国外 DNS 已设置为: $remote_dns"
