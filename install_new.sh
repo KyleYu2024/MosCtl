@@ -4,7 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v1.0.9"
+SCRIPT_VERSION="v0.3.9"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -299,17 +299,17 @@ show_menu() {
     echo -e " 内核版本: \${GREEN}\${KERNEL_VERSION}\${PLAIN} | 状态: \$status_text"
     echo -e "\${GREEN}=====================================\${PLAIN}"
     echo -e "   1. 🔄  同步配置 (Git Pull)"
-    echo -e "   2. ⚙️   修改上游 DNS"
+    echo -e "   2. ⚙️  修改上游 DNS"
     echo -e "   3. 📝  管理自定义规则"
-    echo -e "   4. ⬇️   更新 Geo 数据"
+    echo -e "   4. ⬇️  更新 Geo 数据"
     echo -e "   5. 🚑  开启救援模式"
-    echo -e "   6. ♻️   关闭救援模式"
+    echo -e "   6. ♻️  关闭救援模式"
     echo -e "   7. 📊  查看运行日志"
     echo -e "   8. 🧹  清空 DNS 缓存"
-    echo -e "   9. ▶️   重启服务"
+    echo -e "   9. ▶️  重启服务"
     echo -e "  10. 🩺  DNS 解析测试"
-    echo -e "  11. ⏱️   设置缓存 TTL"
-    echo -e "  12. 🗑️   彻底卸载"
+    echo -e "  11. ⏱️  设置缓存 TTL"
+    echo -e "  12. 🗑️  彻底卸载"
     echo -e "   0. 🚪  退出"
     echo -e "\${GREEN}=====================================\${PLAIN}"
     echo
