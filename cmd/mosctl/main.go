@@ -19,7 +19,6 @@ const (
 // =======================================
 
 func runCommand(args ...string) (string, error) {
-	// 调用我们刚刚升级过的 mosctl
 	cmd := exec.Command("mosctl", args...)
 	output, err := cmd.CombinedOutput()
 	return string(output), err
@@ -29,19 +28,16 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 
-	// 1. 允许跨域
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
 	config.AllowCredentials = true
 	config.AddAllowHeaders("Authorization")
 	r.Use(cors.New(config))
 
-	// 2. 鉴权
 	auth := gin.BasicAuth(gin.Accounts{
 		USER: PASSWORD,
 	})
 
-	// 3. API 路由
 	api := r.Group("/api", auth)
 	{
 		api.GET("/auth", func(c *gin.Context) {
@@ -49,22 +45,17 @@ func main() {
 		})
 
 		api.GET("/stats", func(c *gin.Context) {
-			// A. 状态
 			statusOut, _ := exec.Command("systemctl", "is-active", "mosdns").CombinedOutput()
 			status := strings.TrimSpace(string(statusOut))
 
-			// B. 内存
 			memOut, _ := exec.Command("bash", "-c", "ps -o rss= -p $(pidof mosdns) || echo 0").CombinedOutput()
 			memKb := strings.TrimSpace(string(memOut))
 
-			// C. 版本
 			verOut, _ := runCommand("version")
 
-			// D. 日志量
 			logCountOut, _ := exec.Command("bash", "-c", "wc -l < /var/log/mosdns.log || echo 0").CombinedOutput()
 			logCount := strings.TrimSpace(string(logCountOut))
 
-			// E. 运行时长
 			uptimeOut, _ := exec.Command("bash", "-c", "ps -p $(pidof mosdns) -o etime= || echo '00:00'").CombinedOutput()
 			
 			c.JSON(200, gin.H{
@@ -88,7 +79,7 @@ func main() {
 
 		api.POST("/action", func(c *gin.Context) {
 			action := c.Query("cmd")
-			val := c.Query("val") // 获取参数
+			val := c.Query("val")
 
 			var args []string
 			switch action {
@@ -99,19 +90,14 @@ func main() {
 				}()
 				c.JSON(200, gin.H{"msg": "正在重启服务..."})
 				return
-			
-			// === 新增：修改缓存时间 ===
 			case "set_ttl":
 				if val == "" {
 					c.JSON(400, gin.H{"msg": "缺少参数 val"})
 					return
 				}
 				args = []string{"cache-ttl", val}
-
-			// === 新增：网络诊断 ===
 			case "test_dns":
 				args = []string{"test"}
-
 			case "update_geo":
 				args = []string{"update"}
 			case "flush_cache":
@@ -132,7 +118,6 @@ func main() {
 				c.JSON(500, gin.H{"msg": "执行出错", "output": string(output)})
 				return
 			}
-			// 将命令行里的颜色代码去除，防止前端显示乱码（简单处理）
 			cleanOutput := strings.ReplaceAll(string(output), "\x1b[0;32m", "")
 			cleanOutput = strings.ReplaceAll(cleanOutput, "\x1b[0m", "")
 			c.JSON(200, gin.H{"msg": "执行成功", "output": cleanOutput})
