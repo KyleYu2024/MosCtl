@@ -4,7 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.7"
+SCRIPT_VERSION="v0.3.8"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 管道修复版)...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 菜单重构版)...${NC}"
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/8] 环境准备...${NC}"
@@ -99,10 +99,22 @@ rescue_enable() {
 
 rescue_disable() {
     if [ "\$1" != "silent" ]; then echo -e "\${GREEN}♻️  正在关闭救援模式...\${PLAIN}"; fi
+    
+    # 清理防火墙规则
     iptables -t nat -D PREROUTING -p udp --dport 53 -j DNAT --to-destination \$RESCUE_DNS 2>/dev/null || true
     iptables -t nat -D PREROUTING -p tcp --dport 53 -j DNAT --to-destination \$RESCUE_DNS 2>/dev/null || true
     iptables -t nat -D POSTROUTING -p udp -d \$RESCUE_DNS --dport 53 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -p tcp -d \$RESCUE_DNS --dport 53 -j MASQUERADE 2>/dev/null || true
+
+    # 打印切回的具体 DNS 信息
+    if [ "\$1" != "silent" ] && [ -f "\$CONFIG_FILE" ]; then
+        local local_dns=\$(grep "# TAG_LOCAL" \$CONFIG_FILE | cut -d '"' -f 2)
+        local remote_dns=\$(grep "# TAG_REMOTE" \$CONFIG_FILE | cut -d '"' -f 2)
+        
+        echo -e "\${GREEN}✅ 流量已切回正常上游配置：\${PLAIN}"
+        echo -e "   🏠 国内: \${GREEN}\${local_dns}\${PLAIN}"
+        echo -e "   🌍 国外: \${GREEN}\${remote_dns}\${PLAIN}"
+    fi
 }
 
 sync_config() {
@@ -165,14 +177,7 @@ change_upstream() {
     local default_proto=\$3
     echo -e "\n\${YELLOW}📝 修改 [\$type] DNS 上游\${PLAIN}"
     grep "\$tag_marker" \$CONFIG_FILE | grep -v "grep"
-    # 修复：强制从 tty 读取
-    if [ -t 0 ]; then
-        read -p "地址: " new_ip
-    else
-        echo -n "地址: "
-        read new_ip < /dev/tty
-    fi
-    
+    if [ -t 0 ]; then read -p "地址: " new_ip; else echo -n "地址: "; read new_ip < /dev/tty; fi
     if [ -z "\$new_ip" ]; then echo "已取消"; return; fi
     if [[ -n "\$default_proto" ]] && [[ "\$new_ip" != *"://"* ]]; then new_ip="\${default_proto}://\${new_ip}"; fi
     sed -i "s|\(.*\)- addr:.*\$tag_marker|\1- addr: \"\$new_ip\" \$tag_marker|" \$CONFIG_FILE
@@ -184,13 +189,7 @@ change_cache_ttl() {
     if [ -z "\$new_ttl" ]; then
         echo -e "\n\${YELLOW}⏱️  修改 DNS 缓存时间 (TTL)\${PLAIN}"
         echo "当前配置: \$(grep "lazy_cache_ttl" \$CONFIG_FILE | awk '{print \$2}') 秒"
-        # 修复：强制从 tty 读取
-        if [ -t 0 ]; then
-            read -p "请输入新的缓存时间 (秒): " new_ttl
-        else
-            echo -n "请输入新的缓存时间 (秒): "
-            read new_ttl < /dev/tty
-        fi
+        if [ -t 0 ]; then read -p "请输入新的缓存时间 (秒): " new_ttl; else echo -n "请输入新的缓存时间 (秒): "; read new_ttl < /dev/tty; fi
     fi
     if [[ ! "\$new_ttl" =~ ^[0-9]+$ ]]; then echo -e "\${RED}❌ 错误：TTL 必须是数字\${PLAIN}"; return 1; fi
     echo "修改缓存时间为: \${new_ttl} 秒"
@@ -235,49 +234,97 @@ flush_cache() {
     systemctl restart mosdns && echo -e "\${GREEN}✅ 缓存已清空！\${PLAIN}"
 }
 
+# === 1. 服务管理子菜单 ===
+service_menu() {
+    clear
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    echo -e "\${GREEN}       ⚙️  MosDNS 服务管理           \${PLAIN}"
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    echo -e "  1. ▶️  启动服务 (Start)"
+    echo -e "  2. ⏹️  停止服务 (Stop)"
+    echo -e "  3. 🔄  重启服务 (Restart)"
+    echo -e "  0. 🔙  返回主菜单"
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    
+    if [ -t 0 ]; then read -p "请选择: " sub_choice; else echo -n "请选择: "; read sub_choice < /dev/tty; fi
+    
+    case "\$sub_choice" in
+        1) systemctl start mosdns && echo -e "\${GREEN}✅ 服务已启动！\${PLAIN}" ;;
+        2) systemctl stop mosdns && echo -e "\${RED}🛑 服务已停止！\${PLAIN}" ;;
+        3) systemctl restart mosdns && echo -e "\${GREEN}✅ 服务已重启！\${PLAIN}" ;;
+        0) return ;;
+        *) echo -e "\${RED}无效选项\${PLAIN}" ;;
+    esac
+}
+
+# === 3. DNS 参数设置子菜单 (整合了上游/TTL/缓存清理) ===
+dns_settings_menu() {
+    clear
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    echo -e "\${GREEN}       ⚙️  DNS 参数设置              \${PLAIN}"
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    echo -e "  1. 📡  修改上游 DNS (Upstream)"
+    echo -e "  2. ⏱️  设置缓存 TTL (Cache Time)"
+    echo -e "  3. 🧹  清空 DNS 缓存 (Flush)"
+    echo -e "  0. 🔙  返回主菜单"
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    
+    if [ -t 0 ]; then read -p "请选择: " sub_choice; else echo -n "请选择: "; read sub_choice < /dev/tty; fi
+    
+    case "\$sub_choice" in
+        1) upstream_menu ;;
+        2) change_cache_ttl ;;
+        3) flush_cache ;;
+        0) return ;;
+        *) echo -e "\${RED}无效选项\${PLAIN}" ;;
+    esac
+}
+
+# 上游设置子项 (原 config_menu)
+upstream_menu() {
+    echo -e "\n\${GREEN}--- 修改上游 DNS ---\${PLAIN}"
+    echo -e "  1. 🇨🇳 修改国内 DNS (默认补全 udp://)"
+    echo -e "  2. 🌍 修改国外 DNS (不强制补全)"
+    echo -e "  0. 🔙 返回"
+    if [ -t 0 ]; then read -p "请选择: " uc; else echo -n "请选择: "; read uc < /dev/tty; fi
+    case "\$uc" in
+        1) change_upstream "国内" "# TAG_LOCAL" "udp" ;;
+        2) change_upstream "国外" "# TAG_REMOTE" "" ;;
+        0) return ;;
+    esac
+}
+
+# === 6. 救援模式子菜单 (整合了开启/关闭) ===
+rescue_menu() {
+    clear
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    echo -e "\${GREEN}       🚑  救援模式管理              \${PLAIN}"
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    echo -e "  1. ✅  开启救援模式 (强制转发 -> 223.5.5.5)"
+    echo -e "  2. ⏹️  关闭救援模式 (恢复正常)"
+    echo -e "  0. 🔙  返回主菜单"
+    echo -e "\${GREEN}=====================================\${PLAIN}"
+    
+    if [ -t 0 ]; then read -p "请选择: " sub_choice; else echo -n "请选择: "; read sub_choice < /dev/tty; fi
+    
+    case "\$sub_choice" in
+        1) rescue_enable ;;
+        2) rescue_disable ;;
+        0) return ;;
+        *) echo -e "\${RED}无效选项\${PLAIN}" ;;
+    esac
+}
+
 rules_menu() {
     clear
     echo "  1. 🏠 自定义 Hosts"
     echo "  2. 🇨🇳 强制走国内"
     echo "  3. 🌍 强制走国外"
-    # 修复：强制从 tty 读取
-    if [ -t 0 ]; then
-        read -p "请选择: " sub_choice
-    else
-        echo -n "请选择: "
-        read sub_choice < /dev/tty
-    fi
-    
+    if [ -t 0 ]; then read -p "请选择: " sub_choice; else echo -n "请选择: "; read sub_choice < /dev/tty; fi
     case "\$sub_choice" in
         1) edit_rule "/etc/mosdns/rules/hosts.txt" ;;
         2) edit_rule "/etc/mosdns/rules/force-cn.txt" ;;
         3) edit_rule "/etc/mosdns/rules/force-nocn.txt" ;;
-    esac
-}
-
-config_menu() {
-    clear
-    echo -e "\${GREEN}=====================================\${PLAIN}"
-    echo -e "\${GREEN}    ⚙️  修改 DNS 上游配置     \${PLAIN}"
-    echo -e "\${GREEN}=====================================\${PLAIN}"
-    echo -e "  1. 🇨🇳 修改国内 DNS (默认补全 udp://)"
-    echo -e "  2. 🌍 修改国外 DNS (不强制补全)"
-    echo -e "  0. 🔙 返回主菜单"
-    echo -e "\${GREEN}=====================================\${PLAIN}"
-    
-    # 修复：强制从 tty 读取
-    if [ -t 0 ]; then
-        read -p "请选择: " sub_choice
-    else
-        echo -n "请选择: "
-        read sub_choice < /dev/tty
-    fi
-
-    case "\$sub_choice" in
-        1) change_upstream "国内" "# TAG_LOCAL" "udp" ;;
-        2) change_upstream "国外" "# TAG_REMOTE" "" ;;
-        0) return ;;
-        *) echo -e "\${RED}无效\${PLAIN}" ;;
     esac
 }
 
@@ -298,20 +345,11 @@ view_logs() {
 }
 
 uninstall_mosdns() {
-    # 修复：强制从 tty 读取
-    if [ -t 0 ]; then
-        read -p "⚠️  高危操作：确定要彻底卸载 MosDNS 及面板吗？(y/n): " confirm
-    else
-        echo -n "⚠️  高危操作：确定要彻底卸载 MosDNS 及面板吗？(y/n): "
-        read confirm < /dev/tty
-    fi
-    
-    if [ "$confirm" == "y" ]; then
+    if [ -t 0 ]; then read -p "⚠️  高危操作：确定要彻底卸载 MosDNS 及面板吗？(y/n): " confirm; else echo -n "⚠️  高危操作：确定要彻底卸载 MosDNS 及面板吗？(y/n): "; read confirm < /dev/tty; fi
+    if [ "\$confirm" == "y" ]; then
         echo "⏳ 正在停止服务..."
-        # 停止主服务和救援服务
         systemctl stop mosdns 2>/dev/null || true
         systemctl stop mosdns-rescue 2>/dev/null || true
-        # 停止可能存在的 Web 后端服务
         systemctl stop mosdns-web 2>/dev/null || true
         
         echo "🚫 禁用服务..."
@@ -320,33 +358,22 @@ uninstall_mosdns() {
         systemctl disable mosdns-web 2>/dev/null || true
         
         echo "🗑️  清理文件..."
-        # 删除 Systemd 单元文件
         rm -f /etc/systemd/system/mosdns.service
         rm -f /etc/systemd/system/mosdns-rescue.service
         rm -f /etc/systemd/system/mosdns-web.service
-        
-        # 删除内核转发配置 (补漏)
         rm -f /etc/sysctl.d/99-mosdns.conf
-        
-        # 重载 Systemd
         systemctl daemon-reload
         
-        # 删除程序和配置目录
         rm -rf /etc/mosdns
         rm -f /usr/local/bin/mosdns
-        rm -f /usr/local/bin/mosdns-web  # 补漏：删除后端
+        rm -f /usr/local/bin/mosdns-web
         rm -f /var/log/mosdns.log
         
-        # 清理 Crontab
         crontab -l 2>/dev/null | grep -v "mosctl update" | crontab -
-        
-        # 恢复 DNS (防止卸载后断网)
         echo "nameserver 223.5.5.5" > /etc/resolv.conf
         
-        # 最后删除自己
         rm -f /usr/local/bin/mosctl
-        
-        echo -e "${GREEN}✅ 卸载完成。系统已清理干净。${NC}"
+        echo -e "\${GREEN}✅ 卸载完成。系统已清理干净。${NC}"
         exit 0
     fi
 }
@@ -362,47 +389,34 @@ show_menu() {
     echo -e "\${GREEN}=====================================\${PLAIN}"
     echo -e " 内核版本: \${GREEN}\${KERNEL_VERSION}\${PLAIN} | 状态: \$status_text"
     echo -e "\${GREEN}=====================================\${PLAIN}"
-    echo -e "   1. 🔄  同步配置 (Git Pull)"
-    echo -e "   2. ⚙️  修改上游 DNS"
-    echo -e "   3. 📝  管理自定义规则"
-    echo -e "   4. ⬇️  更新 Geo 数据"
-    echo -e "   5. 🚑  开启救援模式"
-    echo -e "   6. ♻️  关闭救援模式"
+    echo -e "   1. 🛠️  服务管理 (启动/停止/重启)"
+    echo -e "   2. 🔄  同步配置 (Git Pull)"
+    echo -e "   3. ⚙️  DNS 参数设置 (上游/缓存/TTL)"
+    echo -e "   4. 📝  管理自定义规则"
+    echo -e "   5. ⬇️  更新 Geo 数据"
+    echo -e "   6. 🚑  救援模式管理"
     echo -e "   7. 📊  查看运行日志"
-    echo -e "   8. 🧹  清空 DNS 缓存"
-    echo -e "   9. ▶️  重启服务"
-    echo -e "  10. 🩺  DNS 解析测试"
-    echo -e "  11. ⏱️  设置缓存 TTL"
-    echo -e "  12. 🗑️  彻底卸载"
+    echo -e "   8. 🩺  DNS 解析测试"
+    echo -e "   9. 🗑️  彻底卸载"
     echo -e "   0. 🚪  退出"
     echo -e "\${GREEN}=====================================\${PLAIN}"
     echo
-    
-    # 修复：强制从 tty 读取
-    if [ -t 0 ]; then
-        read -p "请选择: " choice
-    else
-        echo -n "请选择: "
-        read choice < /dev/tty
-    fi
+    if [ -t 0 ]; then read -p "请选择: " choice; else echo -n "请选择: "; read choice < /dev/tty; fi
 
     case "\$choice" in
-        1) sync_config ;;
-        2) config_menu ;;
-        3) rules_menu ;;
-        4) update_geo_rules ;;
-        5) rescue_enable ;;
-        6) rescue_disable ;;
+        1) service_menu ;;
+        2) sync_config ;;
+        3) dns_settings_menu ;;
+        4) rules_menu ;;
+        5) update_geo_rules ;;
+        6) rescue_menu ;;
         7) view_logs ;;
-        8) flush_cache ;;
-        9) systemctl restart mosdns && echo -e "\${GREEN}已重启\${PLAIN}" ;;
-        10) run_test; read -p "按回车继续..." < /dev/tty ;;
-        11) change_cache_ttl ;;
-        12) uninstall_mosdns ;;
+        8) run_test; read -p "按回车继续..." < /dev/tty ;;
+        9) uninstall_mosdns ;;
         0) exit 0 ;;
         *) echo -e "\${RED}无效\${PLAIN}" ;;
     esac
-    if [[ "\$choice" != "7" && "\$choice" != "10" ]]; then read -p "按回车键返回..." < /dev/tty; show_menu; fi
+    if [[ "\$choice" != "7" && "\$choice" != "8" ]]; then read -p "按回车键返回..." < /dev/tty; show_menu; fi
 }
 
 if [ \$# -gt 0 ]; then
@@ -442,7 +456,6 @@ echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
 /usr/local/bin/mosctl sync || echo -e "${RED}同步配置失败，稍后请手动同步...${NC}"
 
 # ================= 交互式配置环节 (核心修复：强制 < /dev/tty) =================
-# 这里解决了“管道吞字符”导致配置写入乱码的核心 Bug
 echo -e "${YELLOW}[6.5/8] 交互式配置向导...${NC}"
 
 # 强制重置 config.yaml (如果之前被写坏了)
