@@ -4,7 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.9"
+SCRIPT_VERSION="v0.3.7"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 修复版)...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 管道修复版)...${NC}"
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/8] 环境准备...${NC}"
@@ -108,7 +108,6 @@ rescue_disable() {
 sync_config() {
     echo -e "\${YELLOW}☁️  正在从 GitHub 拉取最新配置...\${PLAIN}"
     TEMP_DIR=\$(mktemp -d)
-    # 增加 || true 防止 git 失败导致脚本退出
     git clone --depth 1 "\${GH_PROXY}\${REPO_URL}" "\$TEMP_DIR" >/dev/null 2>&1 || true
     
     if [ -f "\$TEMP_DIR/templates/config.yaml" ]; then
@@ -154,7 +153,7 @@ sync_config() {
             echo -e "\${GREEN}✅ 初始配置已写入。 (等待服务启动)\${PLAIN}"
         fi
     else
-        echo -e "\${RED}❌ 拉取失败，跳过同步步骤${PLAIN}"
+        echo -e "\${RED}❌ 拉取失败，跳过同步步骤\${PLAIN}"
         rm -rf "\$TEMP_DIR"
         return 1
     fi
@@ -166,7 +165,14 @@ change_upstream() {
     local default_proto=\$3
     echo -e "\n\${YELLOW}📝 修改 [\$type] DNS 上游\${PLAIN}"
     grep "\$tag_marker" \$CONFIG_FILE | grep -v "grep"
-    read -p "地址: " new_ip
+    # 修复：强制从 tty 读取
+    if [ -t 0 ]; then
+        read -p "地址: " new_ip
+    else
+        echo -n "地址: "
+        read new_ip < /dev/tty
+    fi
+    
     if [ -z "\$new_ip" ]; then echo "已取消"; return; fi
     if [[ -n "\$default_proto" ]] && [[ "\$new_ip" != *"://"* ]]; then new_ip="\${default_proto}://\${new_ip}"; fi
     sed -i "s|\(.*\)- addr:.*\$tag_marker|\1- addr: \"\$new_ip\" \$tag_marker|" \$CONFIG_FILE
@@ -178,7 +184,13 @@ change_cache_ttl() {
     if [ -z "\$new_ttl" ]; then
         echo -e "\n\${YELLOW}⏱️  修改 DNS 缓存时间 (TTL)\${PLAIN}"
         echo "当前配置: \$(grep "lazy_cache_ttl" \$CONFIG_FILE | awk '{print \$2}') 秒"
-        read -p "请输入新的缓存时间 (秒): " new_ttl
+        # 修复：强制从 tty 读取
+        if [ -t 0 ]; then
+            read -p "请输入新的缓存时间 (秒): " new_ttl
+        else
+            echo -n "请输入新的缓存时间 (秒): "
+            read new_ttl < /dev/tty
+        fi
     fi
     if [[ ! "\$new_ttl" =~ ^[0-9]+$ ]]; then echo -e "\${RED}❌ 错误：TTL 必须是数字\${PLAIN}"; return 1; fi
     echo "修改缓存时间为: \${new_ttl} 秒"
@@ -213,7 +225,7 @@ run_test() {
 edit_rule() {
     local file=\$1
     echo "路径: \$file"
-    read -p "按回车键开始编辑..."
+    read -p "按回车键开始编辑..." < /dev/tty
     nano "\$file"
     systemctl restart mosdns && echo -e "\${GREEN}✅ 规则已应用。\${PLAIN}"
 }
@@ -228,7 +240,14 @@ rules_menu() {
     echo "  1. 🏠 自定义 Hosts"
     echo "  2. 🇨🇳 强制走国内"
     echo "  3. 🌍 强制走国外"
-    read -p "请选择: " sub_choice
+    # 修复：强制从 tty 读取
+    if [ -t 0 ]; then
+        read -p "请选择: " sub_choice
+    else
+        echo -n "请选择: "
+        read sub_choice < /dev/tty
+    fi
+    
     case "\$sub_choice" in
         1) edit_rule "/etc/mosdns/rules/hosts.txt" ;;
         2) edit_rule "/etc/mosdns/rules/force-cn.txt" ;;
@@ -236,7 +255,6 @@ rules_menu() {
     esac
 }
 
-# ⚠️ 这个函数就是之前缺失的，现在补上了！
 config_menu() {
     clear
     echo -e "\${GREEN}=====================================\${PLAIN}"
@@ -246,7 +264,15 @@ config_menu() {
     echo -e "  2. 🌍 修改国外 DNS (不强制补全)"
     echo -e "  0. 🔙 返回主菜单"
     echo -e "\${GREEN}=====================================\${PLAIN}"
-    read -p "请选择: " sub_choice
+    
+    # 修复：强制从 tty 读取
+    if [ -t 0 ]; then
+        read -p "请选择: " sub_choice
+    else
+        echo -n "请选择: "
+        read sub_choice < /dev/tty
+    fi
+
     case "\$sub_choice" in
         1) change_upstream "国内" "# TAG_LOCAL" "udp" ;;
         2) change_upstream "国外" "# TAG_REMOTE" "" ;;
@@ -272,7 +298,14 @@ view_logs() {
 }
 
 uninstall_mosdns() {
-    read -p "确定卸载吗？(y/n): " confirm
+    # 修复：强制从 tty 读取
+    if [ -t 0 ]; then
+        read -p "确定卸载吗？(y/n): " confirm
+    else
+        echo -n "确定卸载吗？(y/n): "
+        read confirm < /dev/tty
+    fi
+    
     if [ "\$confirm" == "y" ]; then
         systemctl stop mosdns
         systemctl disable mosdns
@@ -313,7 +346,14 @@ show_menu() {
     echo -e "   0. 🚪  退出"
     echo -e "\${GREEN}=====================================\${PLAIN}"
     echo
-    read -p "请选择: " choice
+    
+    # 修复：强制从 tty 读取
+    if [ -t 0 ]; then
+        read -p "请选择: " choice
+    else
+        echo -n "请选择: "
+        read choice < /dev/tty
+    fi
 
     case "\$choice" in
         1) sync_config ;;
@@ -325,13 +365,13 @@ show_menu() {
         7) view_logs ;;
         8) flush_cache ;;
         9) systemctl restart mosdns && echo -e "\${GREEN}已重启\${PLAIN}" ;;
-        10) run_test; read -p "按回车继续..." ;;
+        10) run_test; read -p "按回车继续..." < /dev/tty ;;
         11) change_cache_ttl ;;
         12) uninstall_mosdns ;;
         0) exit 0 ;;
         *) echo -e "\${RED}无效\${PLAIN}" ;;
     esac
-    if [[ "\$choice" != "7" && "\$choice" != "10" ]]; then read -p "按回车键返回..."; show_menu; fi
+    if [[ "\$choice" != "7" && "\$choice" != "10" ]]; then read -p "按回车键返回..." < /dev/tty; show_menu; fi
 }
 
 if [ \$# -gt 0 ]; then
@@ -353,7 +393,6 @@ EOF
 chmod +x /usr/local/bin/mosctl
 
 # 5. 下载规则
-echo -e "${YELLOW}[5/8] 检查/下载规则文件...${NC}"
 mkdir -p /etc/mosdns/rules
 download_rule() {
     if [ ! -f "$1" ]; then
@@ -367,37 +406,43 @@ download_rule "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubuserconte
 download_rule "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
 touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt}
 
-# 6. 初次配置 (允许失败，不中断)
+# 6. 初次配置
 echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
 /usr/local/bin/mosctl sync || echo -e "${RED}同步配置失败，稍后请手动同步...${NC}"
 
-# ================= 交互式配置环节 (修复版) =================
-# 即使 mosctl sync 失败，也要让用户配置，避免服务无法启动
+# ================= 交互式配置环节 (核心修复：强制 < /dev/tty) =================
+# 这里解决了“管道吞字符”导致配置写入乱码的核心 Bug
 echo -e "${YELLOW}[6.5/8] 交互式配置向导...${NC}"
 
-# 强制提示，不跳过
+# 强制重置 config.yaml (如果之前被写坏了)
+if grep -q "local_dns=" /etc/mosdns/config.yaml; then
+    echo "⚠️ 检测到配置文件损坏，正在重置..."
+    rm -f /etc/mosdns/config.yaml
+    /usr/local/bin/mosctl sync
+fi
+
 echo -e "请配置 DNS 上游（按回车使用默认值）"
 
+# 读取国内 DNS
 echo -n "国内 DNS (默认 udp://119.29.29.29): "
-read local_dns
+if [ -c /dev/tty ]; then
+    read local_dns < /dev/tty
+else
+    read local_dns
+fi
 local_dns=${local_dns:-"udp://119.29.29.29"}
 if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
 
+# 读取国外 DNS
 echo -n "国外 DNS (默认 10.10.2.252:53): "
-read remote_dns
+if [ -c /dev/tty ]; then
+    read remote_dns < /dev/tty
+else
+    read remote_dns
+fi
 remote_dns=${remote_dns:-"10.10.2.252:53"}
 
-# 写入配置文件
-mkdir -p /etc/mosdns
-# 确保文件存在（如果 sync 失败）
-if [ ! -f /etc/mosdns/config.yaml ]; then
-    echo "log: {level: info, file: '/var/log/mosdns.log'}" > /etc/mosdns/config.yaml
-    echo "plugins: []" >> /etc/mosdns/config.yaml
-    echo "# TAG_LOCAL" >> /etc/mosdns/config.yaml
-    echo "# TAG_REMOTE" >> /etc/mosdns/config.yaml
-    echo -e "${RED}⚠️  注意：配置文件是从空生成的，请务必执行 'mosctl sync' 修复！${NC}"
-fi
-
+# 写入配置
 sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
 sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"${remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
 
