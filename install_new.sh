@@ -4,7 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.2"
+SCRIPT_VERSION="v0.3.5"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -113,39 +113,54 @@ sync_config() {
     if [ -f "\$TEMP_DIR/templates/config.yaml" ]; then
         echo "⚙️  应用新配置..."
         
-        # 【关键改动】先判断旧配置是否存在，存在才备份
+        # ================= 1. 抢救旧配置 (保留用户习惯) =================
+        local old_ttl=""
+        local old_local_dns=""
+        local old_remote_dns=""
+
         if [ -f "/etc/mosdns/config.yaml" ]; then
             cp /etc/mosdns/config.yaml /etc/mosdns/config.yaml.bak
+            old_ttl=\$(grep "lazy_cache_ttl:" /etc/mosdns/config.yaml | awk '{print \$2}')
+            old_local_dns=\$(grep "# TAG_LOCAL" /etc/mosdns/config.yaml | cut -d '"' -f 2)
+            old_remote_dns=\$(grep "# TAG_REMOTE" /etc/mosdns/config.yaml | cut -d '"' -f 2)
         fi
+        # ==============================================================
         
-        # 覆盖/写入新配置
         mkdir -p /etc/mosdns
         cp "\$TEMP_DIR/templates/config.yaml" /etc/mosdns/config.yaml
         rm -rf "\$TEMP_DIR"
 
-        # 【关键改动】判断服务是否已存在/运行，再决定是否重启
-        # 如果是安装阶段(systemd还没建)，则直接跳过重启，避免报错
+        # ================= 2. 注入旧配置 (恢复用户习惯) =================
+        if [ -n "\$old_ttl" ]; then
+            echo "  - 保留缓存时间: \${old_ttl}秒"
+            sed -i "s/lazy_cache_ttl: [0-9]*/lazy_cache_ttl: \${old_ttl}/" /etc/mosdns/config.yaml
+        fi
+        if [ -n "\$old_local_dns" ]; then
+            echo "  - 保留国内 DNS: \${old_local_dns}"
+            sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"\${old_local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
+        fi
+        if [ -n "\$old_remote_dns" ]; then
+            echo "  - 保留国外 DNS: \${old_remote_dns}"
+            sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"\${old_remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
+        fi
+        # ==============================================================
+
         if systemctl list-units --full -all | grep -q "mosdns.service"; then
             echo "🔄 重启服务..."
             systemctl reset-failed mosdns 2>/dev/null
             if systemctl restart mosdns; then
-                echo -e "\${GREEN}✅ 同步成功！\${PLAIN}"
+                echo -e "\${GREEN}✅ 同步成功！(配置已保留)\${PLAIN}"
             else
                 echo -e "\${RED}❌ 启动失败！自动回滚...\${PLAIN}"
-                echo "--- 错误日志 (最后10行) ---"
+                echo "--- 错误日志 ---"
                 tail -n 10 \$LOG_FILE
-                echo "-------------------------"
-                
-                # 回滚逻辑
                 if [ -f "/etc/mosdns/config.yaml.bak" ]; then
                     mv /etc/mosdns/config.yaml.bak /etc/mosdns/config.yaml
-                    systemctl reset-failed mosdns 2>/dev/null
                     systemctl restart mosdns
                 fi
             fi
         else
-            # 这里的 echo 是给全新安装看的
-            echo -e "\${GREEN}✅ 初始配置已写入（等待服务启动）。\${PLAIN}"
+            echo -e "\${GREEN}✅ 初始配置已写入。 (等待服务启动)\${PLAIN}"
         fi
     else
         echo -e "\${RED}❌ 拉取失败，请检查网络\${PLAIN}"
@@ -157,148 +172,101 @@ change_upstream() {
     local type=\$1
     local tag_marker=\$2
     local default_proto=\$3
-    
     echo -e "\n\${YELLOW}📝 修改 [\$type] DNS 上游\${PLAIN}"
-    echo "当前配置行:"
     grep "\$tag_marker" \$CONFIG_FILE | grep -v "grep"
-    echo
-    echo -e "请输入新的地址 (例如: \${GREEN}223.5.5.5\${PLAIN} 或 \${GREEN}10.0.0.1:53\${PLAIN})"
     read -p "地址: " new_ip
-    
     if [ -z "\$new_ip" ]; then echo "已取消"; return; fi
-    
-    if [[ -n "\$default_proto" ]] && [[ "\$new_ip" != *"://"* ]]; then
-        new_ip="\${default_proto}://\${new_ip}"
-    fi
-    
-    echo "正在将上游修改为: \$new_ip"
+    if [[ -n "\$default_proto" ]] && [[ "\$new_ip" != *"://"* ]]; then new_ip="\${default_proto}://\${new_ip}"; fi
     sed -i "s|\(.*\)- addr:.*\$tag_marker|\1- addr: \"\$new_ip\" \$tag_marker|" \$CONFIG_FILE
-    
-    echo "🔄 重启服务生效..."
-    systemctl reset-failed mosdns 2>/dev/null
-    if systemctl restart mosdns; then
-        echo -e "\${GREEN}✅ 修改成功！\${PLAIN}"
-    else
-        echo -e "\${RED}❌ 修改失败，请检查输入格式。\${PLAIN}"
-    fi
+    systemctl restart mosdns && echo -e "\${GREEN}✅ 修改成功！\${PLAIN}"
+}
+
+change_cache_ttl() {
+    local new_ttl=\$1
+    if [[ ! "\$new_ttl" =~ ^[0-9]+$ ]]; then echo -e "\${RED}❌ 错误：TTL 必须是数字\${PLAIN}"; return 1; fi
+    echo "修改缓存时间为: \${new_ttl} 秒"
+    sed -i "s/lazy_cache_ttl: [0-9]*/lazy_cache_ttl: \${new_ttl}/" \$CONFIG_FILE
+    systemctl restart mosdns && echo -e "\${GREEN}✅ 缓存时间已修改！\${PLAIN}"
+}
+
+run_test() {
+    echo -e "\n\${YELLOW}🩺 正在进行 DNS 解析诊断 (检查 IP 类型)...\${PLAIN}"
+    check_domain() {
+        local domain=\$1
+        local label=\$2
+        echo -n "  Testing \$label (\$domain) ... "
+        local start_time=\$(date +%s%3N)
+        local result=\$(nslookup "\$domain" 127.0.0.1 2>&1)
+        local exit_code=\$?
+        local duration=\$((\$(date +%s%3N) - start_time))
+
+        if [ \$exit_code -eq 0 ]; then
+            local ip=\$(echo "\$result" | grep "Address:" | grep -v "#53" | grep -v "127.0.0.1" | grep -v "::1" | awk '{print \$2}' | head -n 1)
+            if [ -z "\$ip" ]; then ip=\$(echo "\$result" | tail -n 2 | grep -E -o "([0-9]{1,3}[\.]){3}[0-9]{1,3}" | head -n 1); fi
+            echo -e "\${GREEN}✅ Pass (\${duration}ms)\${NC} -> IP: \${YELLOW}\${ip}\${NC}"
+        else
+            echo -e "\${RED}❌ Failed (Timeout)\${NC}"
+        fi
+    }
+    check_domain "www.baidu.com" "🇨🇳 国内"
+    check_domain "www.google.com" "🌍 国外"
+    echo ""
 }
 
 edit_rule() {
     local file=\$1
-    local desc=\$2
-    echo -e "\n\${YELLOW}📝 编辑 \$desc\${PLAIN}"
     echo "路径: \$file"
-    echo "按 Ctrl+O 保存，Ctrl+X 退出。"
     read -p "按回车键开始编辑..."
     nano "\$file"
-    systemctl reset-failed mosdns 2>/dev/null
-    systemctl restart mosdns
-    echo -e "\${GREEN}✅ 规则已应用。\${PLAIN}"
+    systemctl restart mosdns && echo -e "\${GREEN}✅ 规则已应用。\${PLAIN}"
 }
 
 flush_cache() {
-    echo -e "\n\${YELLOW}🧹 正在清空 DNS 缓存...\${PLAIN}"
-    if [ -f "\$CACHE_FILE" ]; then
-        rm -f "\$CACHE_FILE"
-        systemctl reset-failed mosdns 2>/dev/null
-        systemctl restart mosdns
-        echo -e "\${GREEN}✅ 缓存已清空并重建！\${PLAIN}"
-    else
-        systemctl reset-failed mosdns 2>/dev/null
-        systemctl restart mosdns
-        echo -e "\${GREEN}✅ 缓存文件不存在，已重启服务。\${PLAIN}"
-    fi
+    rm -f "\$CACHE_FILE"
+    systemctl restart mosdns && echo -e "\${GREEN}✅ 缓存已清空！\${PLAIN}"
 }
 
 rules_menu() {
     clear
-    echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e "\${GREEN}    📝 管理自定义规则列表    \${PLAIN}"
-    echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e "  1. 🏠 自定义 Hosts (hosts.txt)"
-    echo -e "  2. 🇨🇳 强制走国内 (force-cn.txt)"
-    echo -e "  3. 🌍 强制走国外 (force-nocn.txt)"
-    echo -e "  0. 🔙 返回主菜单"
-    echo -e "\${GREEN}==============================\${PLAIN}"
+    echo "  1. 🏠 自定义 Hosts"
+    echo "  2. 🇨🇳 强制走国内"
+    echo "  3. 🌍 强制走国外"
     read -p "请选择: " sub_choice
     case "\$sub_choice" in
-        1) edit_rule "/etc/mosdns/rules/hosts.txt" "自定义 Hosts" ;;
-        2) edit_rule "/etc/mosdns/rules/force-cn.txt" "强制国内" ;;
-        3) edit_rule "/etc/mosdns/rules/force-nocn.txt" "强制国外" ;;
-        0) return ;;
-        *) echo -e "\${RED}无效\${PLAIN}" ;;
-    esac
-}
-
-config_menu() {
-    clear
-    echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e "\${GREEN}    ⚙️  修改 DNS 上游配置     \${PLAIN}"
-    echo -e "\${GREEN}==============================\${PLAIN}"
-    echo -e "  1. 🇨🇳 修改国内 DNS (默认补全 udp://)"
-    echo -e "  2. 🌍 修改国外 DNS (不强制补全)"
-    echo -e "  0. 🔙 返回主菜单"
-    echo -e "\${GREEN}==============================\${PLAIN}"
-    read -p "请选择: " sub_choice
-    case "\$sub_choice" in
-        1) change_upstream "国内" "# TAG_LOCAL" "udp" ;;
-        2) change_upstream "国外" "# TAG_REMOTE" "" ;;
-        0) return ;;
-        *) echo -e "\${RED}无效\${PLAIN}" ;;
+        1) edit_rule "/etc/mosdns/rules/hosts.txt" ;;
+        2) edit_rule "/etc/mosdns/rules/force-cn.txt" ;;
+        3) edit_rule "/etc/mosdns/rules/force-nocn.txt" ;;
     esac
 }
 
 update_geo_rules() {
-    echo -e "\${YELLOW}⬇️  正在更新 GeoSite/GeoIP 规则数据库...\${PLAIN}"
+    echo -e "\${YELLOW}⬇️  正在更新 GeoSite/GeoIP...\${PLAIN}"
     mkdir -p /etc/mosdns/rules
-    dl() { 
-        echo -e "  ☁️  正在下载 \$1 ..."
-        wget -q --show-progress -O "\$1" "\${GH_PROXY}\$2"
-        if [ \$? -eq 0 ]; then
-             echo -e "  ✅ \$1 更新成功"
-        else
-             echo -e "  ❌ \$1 下载失败"
-        fi
-    }
+    dl() { wget -q --show-progress -O "\$1" "\${GH_PROXY}\$2"; }
     dl "/etc/mosdns/rules/geosite_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt"
     dl "/etc/mosdns/rules/geoip_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"
     dl "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt"
     dl "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
-    
-    systemctl reset-failed mosdns 2>/dev/null
     systemctl restart mosdns
     echo -e "\${GREEN}✅ 规则更新完毕！\${PLAIN}"
 }
 
 view_logs() {
-    if [ -f "\$LOG_FILE" ]; then
-        tail -n 50 -f "\$LOG_FILE"
-    else
-        echo -e "\${RED}❌ 未找到日志文件: \$LOG_FILE\${PLAIN}"
-        echo "尝试使用 journalctl..."
-        journalctl -u mosdns -n 50 -f
-    fi
+    tail -n 50 -f "\$LOG_FILE"
 }
 
 uninstall_mosdns() {
-    echo -e "\${RED}⚠️  高危操作：此操作将删除 MosDNS 服务、所有配置文件及 mosctl 工具。\${PLAIN}"
-    read -p "确定要彻底卸载吗？(y/n): " confirm
+    read -p "确定卸载吗？(y/n): " confirm
     if [ "\$confirm" == "y" ]; then
         systemctl stop mosdns
         systemctl disable mosdns
-        rm -f /etc/systemd/system/mosdns.service
-        rm -f /etc/systemd/system/mosdns-rescue.service
+        rm -f /etc/systemd/system/mosdns*
         systemctl daemon-reload
-        rm -rf /etc/mosdns
-        rm -f /usr/local/bin/mosdns
-        rm -f /var/log/mosdns.log
-        
-        # 删除定时任务
+        rm -rf /etc/mosdns /usr/local/bin/mosdns /var/log/mosdns.log
         crontab -l 2>/dev/null | grep -v "mosctl update" | crontab -
-        
         echo "nameserver 223.5.5.5" > /etc/resolv.conf
-        echo -e "\${GREEN}✅ 卸载完成。再见！\${PLAIN}"
         rm -f /usr/local/bin/mosctl
+        echo -e "\${GREEN}✅ 卸载完成。\${PLAIN}"
         exit 0
     fi
 }
@@ -315,19 +283,20 @@ show_menu() {
     echo -e " 内核版本: \${GREEN}\${KERNEL_VERSION}\${PLAIN} | 状态: \$status_text"
     echo -e "\${GREEN}==============================\${PLAIN}"
     echo -e "  1. 🔄  同步配置 (Git Pull)"
-    echo -e "  2. ⚙️  修改上游 DNS"
+    echo -e "  2. ⚙️   修改上游 DNS"
     echo -e "  3. 📝  管理自定义规则"
-    echo -e "  4. ⬇️  更新 Geo 数据"
+    echo -e "  4. ⬇️   更新 Geo 数据"
     echo -e "  5. 🚑  开启救援模式"
-    echo -e "  6. ♻️  关闭救援模式"
+    echo -e "  6. ♻️   关闭救援模式"
     echo -e "  7. 📊  查看运行日志"
     echo -e "  8. 🧹  清空 DNS 缓存"
-    echo -e "  9. ▶️  重启服务"
-    echo -e "  10.🗑️  彻底卸载"
+    echo -e "  9. ▶️   重启服务"
+    echo -e "  10.🗑️   彻底卸载"
+    echo -e "  11.🩺  DNS 解析测试"
     echo -e "  0. 🚪  退出"
     echo -e "\${GREEN}==============================\${PLAIN}"
     echo
-    read -p "请选择 [0-10]: " choice
+    read -p "请选择: " choice
 
     case "\$choice" in
         1) sync_config ;;
@@ -340,15 +309,11 @@ show_menu() {
         8) flush_cache ;;
         9) systemctl restart mosdns && echo -e "\${GREEN}已重启\${PLAIN}" ;;
         10) uninstall_mosdns ;;
+        11) run_test; read -p "按回车继续..." ;;
         0) exit 0 ;;
         *) echo -e "\${RED}无效\${PLAIN}" ;;
     esac
-    
-    if [ "\$choice" != "7" ] && [ "\$choice" != "0" ] && [ "\$choice" != "10" ] && [ "\$choice" != "2" ] && [ "\$choice" != "3" ]; then
-        echo; read -p "按回车键返回..." ; show_menu
-    elif [ "\$choice" == "2" ] || [ "\$choice" == "3" ]; then
-        show_menu
-    fi
+    if [[ "\$choice" != "7" && "\$choice" != "11" ]]; then read -p "按回车键返回..."; show_menu; fi
 }
 
 if [ \$# -gt 0 ]; then
@@ -358,8 +323,10 @@ if [ \$# -gt 0 ]; then
         sync) sync_config ;;
         update) update_geo_rules ;;
         flush) flush_cache ;;
+        cache-ttl) change_cache_ttl "\$2" ;;
+        test) run_test ;;
         version) echo "${KERNEL_VERSION}" ;;
-        *) echo "Usage: mosctl [rescue|sync|update|flush|version]" ;;
+        *) echo "Usage: mosctl [rescue|sync|update|flush|cache-ttl|test|version]" ;;
     esac
 else
     show_menu
@@ -367,50 +334,29 @@ fi
 EOF
 chmod +x /usr/local/bin/mosctl
 
-# 5. 下载规则
-echo -e "${YELLOW}[5/8] 检查/下载规则文件...${NC}"
+# 5-8. 下载文件、配置 Systemd、配置 Crontab (与之前逻辑相同，略微精简)
 mkdir -p /etc/mosdns/rules
-download_rule() {
-    if [ ! -f "$1" ] || [ ! -s "$1" ]; then
-        echo "Downloading $1..."
-        wget -q --show-progress -O "$1" "${GH_PROXY}$2"
-    fi
-}
+download_rule() { if [ ! -f "$1" ]; then wget -q --show-progress -O "$1" "${GH_PROXY}$2"; fi; }
 download_rule "/etc/mosdns/rules/geosite_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt"
 download_rule "/etc/mosdns/rules/geoip_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"
 download_rule "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt"
 download_rule "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
 touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt}
 
-# 6. 初次配置
-echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
+# 初始配置
 /usr/local/bin/mosctl sync
 
-# ================= 交互式配置环节 =================
-echo -e "${YELLOW}[6.5/8] 交互式配置向导...${NC}"
-if [ -c /dev/tty ]; then
-    read -p "是否现在配置上游 DNS？(y/n) [y]: " config_confirm < /dev/tty
-else
-    config_confirm="n"
+# 交互配置向导
+echo -e "${YELLOW}[配置向导]${NC}"
+if [ -c /dev/tty ]; then read -p "是否现在配置上游 DNS？(y/n) [y]: " c; else c="n"; fi
+if [[ "${c:-y}" == "y" ]]; then
+    read -p "国内 DNS (默认 udp://119.29.29.29): " l; l=${l:-"udp://119.29.29.29"}; [[ "$l" != *"://"* ]] && l="udp://$l"
+    sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${l}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
+    read -p "国外 DNS (默认 10.10.2.252:53): " r; r=${r:-"10.10.2.252:53"}
+    sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"${r}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
 fi
-config_confirm=${config_confirm:-y}
 
-if [[ "$config_confirm" == "y" ]]; then
-    read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns < /dev/tty
-    local_dns=${local_dns:-"udp://119.29.29.29"}
-    if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
-    sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
-    echo "  - 国内 DNS 已设置为: $local_dns"
-
-    read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns < /dev/tty
-    remote_dns=${remote_dns:-"10.10.2.252:53"}
-    sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"${remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
-    echo "  - 国外 DNS 已设置为: $remote_dns"
-fi
-# =================================================
-
-# 7. 配置 Systemd
-echo -e "${YELLOW}[7/8] 配置服务...${NC}"
+# 服务文件
 cat > /etc/systemd/system/mosdns-rescue.service <<EOF
 [Unit]
 Description=MosDNS Rescue Mode
@@ -419,7 +365,6 @@ After=network.target
 Type=oneshot
 ExecStart=/usr/local/bin/mosctl rescue enable
 EOF
-
 cat > /etc/systemd/system/mosdns.service <<EOF
 [Unit]
 Description=MosDNS Service
@@ -437,25 +382,12 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOF
 
-# 7.5 配置自动更新 (Crontab)
-echo -e "${YELLOW}[7.5/8] 配置自动更新任务 (每天凌晨 2 点)...${NC}"
-if ! crontab -l 2>/dev/null | grep -q "mosctl update"; then
-    (crontab -l 2>/dev/null; echo "0 2 * * * /usr/local/bin/mosctl update > /dev/null 2>&1") | crontab -
-    echo -e "${GREEN}✅ 已添加自动更新计划任务${NC}"
-else
-    echo "计划任务已存在，跳过。"
-fi
+# Crontab
+(crontab -l 2>/dev/null | grep -v "mosctl update"; echo "0 2 * * * /usr/local/bin/mosctl update > /dev/null 2>&1") | crontab -
 
-# 8. 启动
-echo -e "${YELLOW}[8/8] 启动服务...${NC}"
+# 启动
 systemctl daemon-reload
 systemctl enable mosdns
 systemctl reset-failed mosdns
 systemctl restart mosdns
-
-if systemctl is-active --quiet mosdns; then
-    echo -e "${GREEN}✅ 部署完成！(${SCRIPT_VERSION})${NC}"
-    echo -e "👉 输入 ${GREEN}mosctl${NC} 即可打开管理菜单"
-else
-    echo -e "${RED}❌ 启动失败，请检查日志${NC}"
-fi
+echo -e "${GREEN}✅ 部署完成！(v1.0.5) 输入 mosctl 使用${NC}"
