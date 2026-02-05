@@ -4,7 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.8"
+SCRIPT_VERSION="v1.0.9"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 正式版)...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 修复版)...${NC}"
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/8] 环境准备...${NC}"
@@ -108,7 +108,8 @@ rescue_disable() {
 sync_config() {
     echo -e "\${YELLOW}☁️  正在从 GitHub 拉取最新配置...\${PLAIN}"
     TEMP_DIR=\$(mktemp -d)
-    git clone --depth 1 "\${GH_PROXY}\${REPO_URL}" "\$TEMP_DIR" >/dev/null 2>&1
+    # 增加 || true 防止 git 失败导致脚本退出
+    git clone --depth 1 "\${GH_PROXY}\${REPO_URL}" "\$TEMP_DIR" >/dev/null 2>&1 || true
     
     if [ -f "\$TEMP_DIR/templates/config.yaml" ]; then
         echo "⚙️  应用新配置..."
@@ -128,15 +129,12 @@ sync_config() {
         rm -rf "\$TEMP_DIR"
 
         if [ -n "\$old_ttl" ]; then
-            echo "  - 保留缓存时间: \${old_ttl}秒"
             sed -i "s/lazy_cache_ttl: [0-9]*/lazy_cache_ttl: \${old_ttl}/" /etc/mosdns/config.yaml
         fi
         if [ -n "\$old_local_dns" ]; then
-            echo "  - 保留国内 DNS: \${old_local_dns}"
             sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"\${old_local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
         fi
         if [ -n "\$old_remote_dns" ]; then
-            echo "  - 保留国外 DNS: \${old_remote_dns}"
             sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"\${old_remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
         fi
 
@@ -147,8 +145,6 @@ sync_config() {
                 echo -e "\${GREEN}✅ 同步成功！(配置已保留)\${PLAIN}"
             else
                 echo -e "\${RED}❌ 启动失败！自动回滚...\${PLAIN}"
-                echo "--- 错误日志 ---"
-                tail -n 10 \$LOG_FILE
                 if [ -f "/etc/mosdns/config.yaml.bak" ]; then
                     mv /etc/mosdns/config.yaml.bak /etc/mosdns/config.yaml
                     systemctl restart mosdns
@@ -158,8 +154,9 @@ sync_config() {
             echo -e "\${GREEN}✅ 初始配置已写入。 (等待服务启动)\${PLAIN}"
         fi
     else
-        echo -e "\${RED}❌ 拉取失败，请检查网络\${PLAIN}"
+        echo -e "\${RED}❌ 拉取失败，跳过同步步骤${PLAIN}"
         rm -rf "\$TEMP_DIR"
+        return 1
     fi
 }
 
@@ -239,7 +236,7 @@ rules_menu() {
     esac
 }
 
-# ⚠️ 之前漏掉的 config_menu 函数补回来了！
+# ⚠️ 这个函数就是之前缺失的，现在补上了！
 config_menu() {
     clear
     echo -e "\${GREEN}=====================================\${PLAIN}"
@@ -302,17 +299,17 @@ show_menu() {
     echo -e " 内核版本: \${GREEN}\${KERNEL_VERSION}\${PLAIN} | 状态: \$status_text"
     echo -e "\${GREEN}=====================================\${PLAIN}"
     echo -e "   1. 🔄  同步配置 (Git Pull)"
-    echo -e "   2. ⚙️  修改上游 DNS"
+    echo -e "   2. ⚙️   修改上游 DNS"
     echo -e "   3. 📝  管理自定义规则"
-    echo -e "   4. ⬇️  更新 Geo 数据"
+    echo -e "   4. ⬇️   更新 Geo 数据"
     echo -e "   5. 🚑  开启救援模式"
-    echo -e "   6. ♻️  关闭救援模式"
+    echo -e "   6. ♻️   关闭救援模式"
     echo -e "   7. 📊  查看运行日志"
     echo -e "   8. 🧹  清空 DNS 缓存"
-    echo -e "   9. ▶️  重启服务"
+    echo -e "   9. ▶️   重启服务"
     echo -e "  10. 🩺  DNS 解析测试"
-    echo -e "  11. ⏱️  设置缓存 TTL"
-    echo -e "  12. 🗑️  彻底卸载"
+    echo -e "  11. ⏱️   设置缓存 TTL"
+    echo -e "  12. 🗑️   彻底卸载"
     echo -e "   0. 🚪  退出"
     echo -e "\${GREEN}=====================================\${PLAIN}"
     echo
@@ -370,45 +367,42 @@ download_rule "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubuserconte
 download_rule "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
 touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt}
 
-# 6. 初次配置
+# 6. 初次配置 (允许失败，不中断)
 echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
-/usr/local/bin/mosctl sync
+/usr/local/bin/mosctl sync || echo -e "${RED}同步配置失败，稍后请手动同步...${NC}"
 
-# ================= 交互式配置环节 (确保从 tty 读取) =================
+# ================= 交互式配置环节 (修复版) =================
+# 即使 mosctl sync 失败，也要让用户配置，避免服务无法启动
 echo -e "${YELLOW}[6.5/8] 交互式配置向导...${NC}"
-config_confirm="n"
-# 强制从终端读取，即使是在 pipe 模式下
-if [ -t 0 ]; then
-    read -p "是否现在配置上游 DNS？(y/n) [y]: " input_c
-    config_confirm="${input_c:-y}"
-elif [ -c /dev/tty ]; then
-    read -p "是否现在配置上游 DNS？(y/n) [y]: " input_c < /dev/tty
-    config_confirm="${input_c:-y}"
+
+# 强制提示，不跳过
+echo -e "请配置 DNS 上游（按回车使用默认值）"
+
+echo -n "国内 DNS (默认 udp://119.29.29.29): "
+read local_dns
+local_dns=${local_dns:-"udp://119.29.29.29"}
+if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
+
+echo -n "国外 DNS (默认 10.10.2.252:53): "
+read remote_dns
+remote_dns=${remote_dns:-"10.10.2.252:53"}
+
+# 写入配置文件
+mkdir -p /etc/mosdns
+# 确保文件存在（如果 sync 失败）
+if [ ! -f /etc/mosdns/config.yaml ]; then
+    echo "log: {level: info, file: '/var/log/mosdns.log'}" > /etc/mosdns/config.yaml
+    echo "plugins: []" >> /etc/mosdns/config.yaml
+    echo "# TAG_LOCAL" >> /etc/mosdns/config.yaml
+    echo "# TAG_REMOTE" >> /etc/mosdns/config.yaml
+    echo -e "${RED}⚠️  注意：配置文件是从空生成的，请务必执行 'mosctl sync' 修复！${NC}"
 fi
 
-if [[ "$config_confirm" == "y" ]]; then
-    # 强制从 /dev/tty 读取输入
-    if [ -t 0 ]; then
-        read -p "请输入国内 DNS (回车默认 udp://119.29.29.29): " local_dns
-    else
-        echo -n "请输入国内 DNS (回车默认 udp://119.29.29.29): "
-        read local_dns < /dev/tty
-    fi
-    local_dns=${local_dns:-"udp://119.29.29.29"}
-    if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
-    sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
-    echo "  - 国内 DNS 已设置为: $local_dns"
+sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
+sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"${remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
 
-    if [ -t 0 ]; then
-        read -p "请输入国外 DNS (回车默认 10.10.2.252:53): " remote_dns
-    else
-        echo -n "请输入国外 DNS (回车默认 10.10.2.252:53): "
-        read remote_dns < /dev/tty
-    fi
-    remote_dns=${remote_dns:-"10.10.2.252:53"}
-    sed -i "s|\(.*\)- addr:.*# TAG_REMOTE|\1- addr: \"${remote_dns}\" # TAG_REMOTE|" /etc/mosdns/config.yaml
-    echo "  - 国外 DNS 已设置为: $remote_dns"
-fi
+echo "  - 国内 DNS: $local_dns"
+echo "  - 国外 DNS: $remote_dns"
 # =================================================
 
 # 7. 配置 Systemd
