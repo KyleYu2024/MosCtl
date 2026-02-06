@@ -4,7 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.9"
+SCRIPT_VERSION="v0.4.0"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 智能家居适配版)...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION})...${NC}"
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/8] 环境准备...${NC}"
