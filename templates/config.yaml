@@ -33,6 +33,14 @@ plugins:
   # ===========================
   # 2. 规则/匹配器
   # ===========================
+  
+  # [新增] 智能家居 IP 列表 (源 IP)
+  - tag: user_iot_ip
+    type: ip_set
+    args:
+      files:
+        - "/etc/mosdns/rules/user_iot.txt"
+
   - tag: geosite_cn
     type: domain_set
     args:
@@ -75,7 +83,6 @@ plugins:
   # 3. 辅助处理序列 (必须在 Main 之前定义)
   # ===========================
   
-  # 【关键修复】把 has_resp_sequence 提到最前面
   - tag: has_resp_sequence
     type: sequence
     args:
@@ -174,7 +181,14 @@ plugins:
     args:
       - exec: $hosts
       - exec: jump has_resp_sequence
-      # 移除了不兼容的 forward_edns0opt，改用更稳的 ecs 逻辑
+      
+      # [新增] 智能家居直连逻辑 (最优先)
+      # 如果请求来自智能家居 IP，直接转发给国内 DNS，然后结束处理
+      - matches: client_ip $user_iot_ip
+        exec: $forward_local
+      - matches: client_ip $user_iot_ip
+        exec: accept
+
       - exec: $query_is_apple_domain
       - exec: jump has_resp_sequence
       - exec: $query_is_reject_domain
