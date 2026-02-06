@@ -479,14 +479,14 @@ fi
 local_dns=${local_dns:-"udp://119.29.29.29"}
 if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
 
-# 读取国外 DNS
-echo -n "国外 DNS (默认 10.10.2.252:53): "
+# 读取国外 DNS (修改部分)
+echo -n "mihomo或其他代理工具的dns监听地址如10.10.2.252:53: "
 if [ -c /dev/tty ]; then
     read remote_dns < /dev/tty
 else
     read remote_dns
 fi
-remote_dns=${remote_dns:-"10.10.2.252:53"}
+# remote_dns=${remote_dns:-"10.10.2.252:53"}  <-- 已移除默认值
 
 # 写入配置
 sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
