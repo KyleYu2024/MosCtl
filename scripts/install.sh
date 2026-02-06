@@ -24,12 +24,10 @@ echo ">>> 配置 PVE LXC DNS 保护..."
 touch /etc/.pve-ignore.resolv.conf
 
 # 4. 创建空的本地规则文件 (如果不存在)
-if [ ! -f /etc/mosdns/rules/local_direct.txt ]; then
-    touch /etc/mosdns/rules/local_direct.txt
-fi
-if [ ! -f /etc/mosdns/rules/local_proxy.txt ]; then
-    touch /etc/mosdns/rules/local_proxy.txt
-fi
+touch /etc/mosdns/rules/local_direct.txt
+touch /etc/mosdns/rules/local_proxy.txt
+# [新增]
+touch /etc/mosdns/rules/user_iot.txt
 
 # 5. 安装 Systemd 服务
 echo ">>> 安装 Systemd 服务..."
