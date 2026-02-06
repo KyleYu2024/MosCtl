@@ -4,7 +4,7 @@ set -e
 # ================= 配置区 =================
 REPO_URL="https://github.com/KyleYu2024/mosctl.git"
 DEFAULT_MOSDNS_VERSION="v5.3.3"
-SCRIPT_VERSION="v0.3.8"
+SCRIPT_VERSION="v0.3.9"
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
 
@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 菜单重构版)...${NC}"
+echo -e "${GREEN}🚀 开始 MosDNS 全自动部署 (${SCRIPT_VERSION} 智能家居适配版)...${NC}"
 
 # 1. 基础环境
 echo -e "${YELLOW}[1/8] 环境准备...${NC}"
@@ -318,13 +318,15 @@ rescue_menu() {
 rules_menu() {
     clear
     echo "  1. 🏠 自定义 Hosts"
-    echo "  2. 🇨🇳 强制走国内"
-    echo "  3. 🌍 强制走国外"
+    echo "  2. 🇨🇳 强制走国内 (域名)"
+    echo "  3. 🌍 强制走国外 (域名)"
+    echo "  4. 🔌 智能家居直连 (源IP/网段)"
     if [ -t 0 ]; then read -p "请选择: " sub_choice; else echo -n "请选择: "; read sub_choice < /dev/tty; fi
     case "\$sub_choice" in
         1) edit_rule "/etc/mosdns/rules/hosts.txt" ;;
         2) edit_rule "/etc/mosdns/rules/force-cn.txt" ;;
         3) edit_rule "/etc/mosdns/rules/force-nocn.txt" ;;
+        4) edit_rule "/etc/mosdns/rules/user_iot.txt" ;;
     esac
 }
 
@@ -449,7 +451,7 @@ download_rule "/etc/mosdns/rules/geosite_cn.txt" "https://raw.githubusercontent.
 download_rule "/etc/mosdns/rules/geoip_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"
 download_rule "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt"
 download_rule "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
-touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt}
+touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt,user_iot.txt}
 
 # 6. 初次配置
 echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
