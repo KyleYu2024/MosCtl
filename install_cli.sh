@@ -55,6 +55,16 @@ echo "nameserver 223.5.5.5" > /etc/resolv.conf
 sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
 echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-mosdns.conf
 
+# ================= 2.5 开放防火墙端口 =================
+echo -e "${YELLOW}[2.5/8] 开放 53 端口防火墙...${NC}"
+iptables -I INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+iptables -I INPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+# 尝试保存规则 (适配 debian/ubuntu)
+if command -v iptables-save >/dev/null; then
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/rules.v4
+fi
+
 # ================= 3. 安装 MosDNS 主程序 =================
 echo -e "${YELLOW}[3/8] 安装 MosDNS 主程序 (${MOSDNS_VERSION})...${NC}"
 if [ ! -f "/usr/local/bin/mosdns" ]; then

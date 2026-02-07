@@ -17,6 +17,10 @@ func EnableRescue() error {
 		return fmt.Errorf("无法开启内核转发: %v", err)
 	}
 
+	// 1.5 确保 INPUT 链放行 53 端口 (防止被拦截)
+	_ = runCommand("iptables", "-I", "INPUT", "-p", "udp", "--dport", "53", "-j", "ACCEPT")
+	_ = runCommand("iptables", "-I", "INPUT", "-p", "tcp", "--dport", "53", "-j", "ACCEPT")
+
 	// 2. 创建并初始化自定义链
 	_ = runCommand("iptables", "-t", "nat", "-N", "MOSCTL_RESCUE")
 	_ = runCommand("iptables", "-t", "nat", "-F", "MOSCTL_RESCUE")
