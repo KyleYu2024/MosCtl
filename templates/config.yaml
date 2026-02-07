@@ -33,7 +33,6 @@ plugins:
   # 2. 规则/匹配器
   # ===========================
   
-  # 智能家居 IP 列表 (源 IP)
   - tag: user_iot_ip
     type: ip_set
     args:
@@ -84,18 +83,12 @@ plugins:
   # 3. 辅助处理序列
   # ===========================
   
-  - tag: query_log
-    type: query_log
-    args:
-      file: "/var/log/mosdns_query.log"
-
   - tag: has_resp_sequence
     type: sequence
     args:
       - matches: has_resp
         exec: accept
 
-  # ECS 处理
   - tag: ecs_cn
     type: ecs_handler
     args:
@@ -111,7 +104,6 @@ plugins:
       preset: ""
       send: false
 
-  # 国内流 (带缓存)
   - tag: cached_local_sequence
     type: sequence
     args:
@@ -120,7 +112,6 @@ plugins:
         exec: accept
       - exec: $forward_local
 
-  # 国外流 (无缓存)
   - tag: forward_remote_upstream
     type: sequence
     args:
@@ -128,7 +119,6 @@ plugins:
       - exec: prefer_ipv4
       - exec: $forward_remote
 
-  # 兜底 IP 过滤逻辑
   - tag: query_is_non_local_ip
     type: sequence
     args:
@@ -185,11 +175,9 @@ plugins:
   - tag: main_sequence
     type: sequence
     args:
-      - exec: $query_log
       - exec: $hosts
       - exec: jump has_resp_sequence
       
-      # 智能家居直连逻辑
       - matches: client_ip $user_iot_ip
         exec: $forward_local
       - matches: client_ip $user_iot_ip
