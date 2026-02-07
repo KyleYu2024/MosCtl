@@ -23,8 +23,6 @@ plugins:
       upstreams:
         - addr: "udp://119.29.29.29" # TAG_LOCAL
           enable_pipeline: true
-        - addr: "udp://223.5.5.5"
-          enable_pipeline: true
 
   - tag: forward_remote
     type: forward
@@ -35,19 +33,12 @@ plugins:
   # ===========================
   # 2. 规则/匹配器
   # ===========================
-  - tag: user_iot_ip
-    type: ip_set
-    args:
-      files:
-        - "/etc/mosdns/rules/user_iot.txt"
-
   - tag: geosite_cn
     type: domain_set
     args:
       files:
         - "/etc/mosdns/rules/geosite_cn.txt"
         - "/etc/mosdns/rules/force-cn.txt"
-        - "/etc/mosdns/rules/cloud_direct.txt"
         - "/etc/mosdns/rules/local_direct.txt"
 
   - tag: geoip_cn
@@ -68,7 +59,6 @@ plugins:
       files:
         - "/etc/mosdns/rules/geosite_no_cn.txt"
         - "/etc/mosdns/rules/force-nocn.txt"
-        - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
 
   - tag: hosts
@@ -83,8 +73,15 @@ plugins:
       files:
         - "/etc/mosdns/rules/local-ptr.txt"
 
+  # [新增兼容] 智能家居规则
+  - tag: user_iot_ip
+    type: ip_set
+    args:
+      files:
+        - "/etc/mosdns/rules/user_iot.txt"
+
   # ===========================
-  # 3. 辅助处理序列 (必须在 Main 之前定义)
+  # 3. 辅助处理序列 (基于 0.3.7 稳定逻辑)
   # ===========================
   
   - tag: has_resp_sequence
@@ -178,7 +175,7 @@ plugins:
         exec: reject 3
 
   # ===========================
-  # 4. 主入口 (Main Sequence)
+  # 4. 主入口 (基于 0.3.7 稳定结构)
   # ===========================
   - tag: main_sequence
     type: sequence
@@ -186,7 +183,7 @@ plugins:
       - exec: $hosts
       - exec: jump has_resp_sequence
       
-      # [新增] 智能家居直连逻辑
+      # 智能家居直连
       - matches: client_ip $user_iot_ip
         exec: $forward_local
       - matches: client_ip $user_iot_ip
