@@ -31,14 +31,24 @@ func showMenu() {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Println("\n\033[0;32m=====================================\033[0m")
-		fmt.Println("\033[0;32mMosDNS 管理面板 (Go 版)\033[0m")
+		fmt.Println("\033[0;32m           MosDNS 管理面板           \033[0m")
 		fmt.Println("\033[0;32m=====================================\033[0m")
 		
 		status := "🔴 未运行"
+		version := "未知"
 		if exec.Command("systemctl", "is-active", "mosdns").Run() == nil {
 			status = "🟢 运行中"
 		}
-		fmt.Printf("状态: %s\n", status)
+		// 获取 MosDNS 版本
+		vCmd := exec.Command("/usr/local/bin/mosdns", "version")
+		if vOut, err := vCmd.Output(); err == nil {
+			vStr := strings.TrimSpace(string(vOut))
+			if parts := strings.Fields(vStr); len(parts) > 1 {
+				version = parts[1]
+			}
+		}
+
+		fmt.Printf("状态: %s (核心版本: %s)\n", status, version)
 		fmt.Println("\033[0;32m=====================================\033[0m")
 		fmt.Println("1. 🛠️  服务管理 (启动/停止/重启)")
 		fmt.Println("2. 🔄  同步配置 (Git Pull)")
