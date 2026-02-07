@@ -31,37 +31,41 @@ func showMenu() {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Println("\n\033[0;32m=====================================\033[0m")
-		fmt.Println("\033[0;32m           MosDNS 管理面板           \033[0m")
+		fmt.Println("\033[0;32m         MosDNS 管理面板 [0.4.3]      \033[0m")
 		fmt.Println("\033[0;32m=====================================\033[0m")
 		
-		status := "🔴 未运行"
-		version := "未知"
-		if exec.Command("systemctl", "is-active", "mosdns").Run() == nil {
-			status = "🟢 运行中"
+		status := "🟢 运行中"
+		if exec.Command("systemctl", "is-active", "mosdns").Run() != nil {
+			status = "🔴 未运行"
 		}
-		// 获取 MosDNS 版本
+
+		// 改进的版本获取逻辑
+		version := "未知"
 		vCmd := exec.Command("/usr/local/bin/mosdns", "version")
 		if vOut, err := vCmd.Output(); err == nil {
 			vStr := strings.TrimSpace(string(vOut))
-			if parts := strings.Fields(vStr); len(parts) > 1 {
-				version = parts[1]
+			// 过滤掉输出中可能存在的 "mosdns" 前缀或空格
+			vStr = strings.TrimPrefix(vStr, "mosdns")
+			vStr = strings.TrimSpace(vStr)
+			if vStr != "" {
+				version = vStr
 			}
 		}
 
-		fmt.Printf("状态: %s (核心版本: %s)\n", status, version)
+		fmt.Printf(" 状态: %s | 核心: %s\n", status, version)
 		fmt.Println("\033[0;32m=====================================\033[0m")
-		fmt.Println("1. 🛠️  服务管理 (启动/停止/重启)")
-		fmt.Println("2. 🔄  同步配置 (Git Pull)")
-		fmt.Println("3. ⚙️  DNS 参数设置 (上游/缓存/TTL)")
-		fmt.Println("4. 📝  管理自定义规则")
-		fmt.Println("5. ⬇️  更新 Geo 数据")
-		fmt.Println("6. 🚑  救援模式管理")
-		fmt.Println("7. 📊  查看运行日志")
-		fmt.Println("8. 🩺  DNS 解析测试")
-		fmt.Println("9. 🗑️  彻底卸载")
-		fmt.Println("0. 🚪  退出")
+		fmt.Println(" [1] 服务管理 (启动/停止/重启)")
+		fmt.Println(" [2] 同步配置 (Git Pull)")
+		fmt.Println(" [3] 参数设置 (上游/缓存/TTL)")
+		fmt.Println(" [4] 规则管理 (直连/代理/IoT)")
+		fmt.Println(" [5] 更新 Geo 数据库")
+		fmt.Println(" [6] 救援模式管理")
+		fmt.Println(" [7] 查看运行日志")
+		fmt.Println(" [8] DNS 解析测试")
+		fmt.Println(" [9] 彻底卸载脚本")
+		fmt.Println(" [0] 退出程序")
 		fmt.Println("\033[0;32m=====================================\033[0m")
-		fmt.Print("请选择: ")
+		fmt.Print(" 请选择: ")
 
 		if !scanner.Scan() {
 			break
