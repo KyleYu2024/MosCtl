@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	BaseURL    = "https://raw.githubusercontent.com/KyleYu2024/mosctl/main/templates"
+	BaseURL    = "https://raw.githubusercontent.com/KyleYu2024/MosCtl/main/templates"
 	ConfigPath = "/etc/mosdns/config.yaml"
 	RuleDir    = "/etc/mosdns/rules"
 	MosDNSBin  = "/usr/local/bin/mosdns"
