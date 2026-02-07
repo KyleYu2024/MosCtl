@@ -81,9 +81,14 @@ plugins:
         - "/etc/mosdns/rules/local-ptr.txt"
 
   # ===========================
-  # 3. 辅助处理序列 (必须在 Main 之前定义)
+  # 3. 辅助处理序列
   # ===========================
   
+  - tag: query_log
+    type: query_log
+    args:
+      file: "/var/log/mosdns.log"
+
   - tag: has_resp_sequence
     type: sequence
     args:
@@ -180,6 +185,7 @@ plugins:
   - tag: main_sequence
     type: sequence
     args:
+      - exec: $query_log
       - exec: $hosts
       - exec: jump has_resp_sequence
       
