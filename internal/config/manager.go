@@ -111,6 +111,16 @@ func preserveConfigVariables(newConfigTmp string) error {
 }
 
 func SetUpstream(isLocal bool, addr string) error {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return fmt.Errorf("地址不能为空")
+	}
+
+	// 自动补全协议：如果不包含 :// 且不是以 / 开头（针对 Unix Domain Socket）
+	if !strings.Contains(addr, "://") && !strings.HasPrefix(addr, "/") {
+		addr = "udp://" + addr
+	}
+
 	tag := "# TAG_REMOTE"
 	if isLocal {
 		tag = "# TAG_LOCAL"

@@ -12,7 +12,7 @@ var versionCmd = &cobra.Command{
 	Short: "Print the version number of MosCtl",
 	Run: func(cmd *cobra.Command, args []string) {
 		// 这里可以硬编码，也可以通过编译参数注入
-		fmt.Println("v0.4.4")
+		fmt.Println("v0.4.5")
 	},
 }
 
