@@ -3,9 +3,7 @@ log:
   file: "/var/log/mosdns.log"
 
 plugins:
-  # ===========================
-  # 1. 基础插件 (转发/缓存)
-  # ===========================
+  # 1. 缓存与转发
   - tag: cache
     type: cache
     args:
@@ -29,16 +27,7 @@ plugins:
       upstreams:
         - addr: "udp://8.8.8.8" # TAG_REMOTE
 
-  # ===========================
-  # 2. 规则/匹配器
-  # ===========================
-  
-  - tag: user_iot_ip
-    type: ip_set
-    args:
-      files:
-        - "/etc/mosdns/rules/user_iot.txt"
-
+  # 2. 匹配器
   - tag: geosite_cn
     type: domain_set
     args:
@@ -46,18 +35,7 @@ plugins:
         - "/etc/mosdns/rules/geosite_cn.txt"
         - "/etc/mosdns/rules/cloud_direct.txt"
         - "/etc/mosdns/rules/local_direct.txt"
-
-  - tag: geoip_cn
-    type: ip_set
-    args:
-      files:
-        - "/etc/mosdns/rules/geoip_cn.txt"
-
-  - tag: geosite_apple
-    type: domain_set
-    args:
-      files:
-        - "/etc/mosdns/rules/geosite_apple.txt"
+        - "/etc/mosdns/rules/force-cn.txt"
 
   - tag: geosite_no_cn
     type: domain_set
@@ -66,6 +44,25 @@ plugins:
         - "/etc/mosdns/rules/geosite_no_cn.txt"
         - "/etc/mosdns/rules/cloud_proxy.txt"
         - "/etc/mosdns/rules/local_proxy.txt"
+        - "/etc/mosdns/rules/force-nocn.txt"
+
+  - tag: geosite_apple
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geosite_apple.txt"
+
+  - tag: geoip_cn
+    type: ip_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geoip_cn.txt"
+
+  - tag: user_iot_ip
+    type: ip_set
+    args:
+      files:
+        - "/etc/mosdns/rules/user_iot.txt"
 
   - tag: hosts
     type: hosts
@@ -79,30 +76,12 @@ plugins:
       files:
         - "/etc/mosdns/rules/local-ptr.txt"
 
-  # ===========================
-  # 3. 辅助处理序列
-  # ===========================
-  
+  # 3. 处理序列
   - tag: has_resp_sequence
     type: sequence
     args:
       - matches: has_resp
         exec: accept
-
-  - tag: ecs_cn
-    type: ecs_handler
-    args:
-      forward: false
-      preset: 119.29.29.29
-      send: false
-      mask4: 24
-
-  - tag: no_ecs
-    type: ecs_handler
-    args:
-      forward: false
-      preset: ""
-      send: false
 
   - tag: cached_local_sequence
     type: sequence
@@ -115,50 +94,27 @@ plugins:
   - tag: forward_remote_upstream
     type: sequence
     args:
-      - exec: $no_ecs
       - exec: prefer_ipv4
       - exec: $forward_remote
 
-  - tag: query_is_non_local_ip
-    type: sequence
-    args:
-      - exec: $ecs_cn
-      - exec: prefer_ipv4
-      - exec: $cached_local_sequence
-      - matches: "!resp_ip $geoip_cn"
-        exec: drop_resp
-
-  # Apple Fallback
-  - tag: apple_domain_fallback
-    type: fallback
-    args:
-      primary: query_is_non_local_ip
-      secondary: cached_local_sequence
-      threshold: 100
-      always_standby: true
-
-  # 匹配 Apple
-  - tag: query_is_apple_domain
-    type: sequence
-    args:
-      - matches: qname $geosite_apple
-        exec: $apple_domain_fallback
-
-  # 匹配国内
   - tag: query_is_local_domain
     type: sequence
     args:
       - matches: qname $geosite_cn
         exec: $cached_local_sequence
 
-  # 匹配国外
   - tag: query_is_no_local_domain
     type: sequence
     args:
       - matches: qname $geosite_no_cn
         exec: $forward_remote_upstream
 
-  # 拒绝名单
+  - tag: query_is_apple_domain
+    type: sequence
+    args:
+      - matches: qname $geosite_apple
+        exec: $cached_local_sequence
+
   - tag: query_is_reject_domain
     type: sequence
     args:
@@ -169,15 +125,14 @@ plugins:
       - matches: qtype 65
         exec: reject 3
 
-  # ===========================
-  # 4. 主入口 (Main Sequence)
-  # ===========================
+  # 4. 主入口
   - tag: main_sequence
     type: sequence
     args:
       - exec: $hosts
       - exec: jump has_resp_sequence
       
+      # IoT 优先直连
       - matches: client_ip $user_iot_ip
         exec: $forward_local
       - matches: client_ip $user_iot_ip
@@ -191,11 +146,11 @@ plugins:
       - exec: jump has_resp_sequence
       - exec: $query_is_no_local_domain
       - exec: jump has_resp_sequence
-      - exec: $forward_remote_upstream
+      
+      # 兜底：国内解析
+      - exec: $cached_local_sequence
 
-  # ===========================
-  # 5. 服务监听
-  # ===========================
+  # 5. 监听
   - tag: udp_server
     type: udp_server
     args:
