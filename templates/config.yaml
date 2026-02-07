@@ -87,7 +87,7 @@ plugins:
   - tag: query_log
     type: query_log
     args:
-      file: "/var/log/mosdns.log"
+      file: "/var/log/mosdns_query.log"
 
   - tag: has_resp_sequence
     type: sequence
@@ -189,7 +189,7 @@ plugins:
       - exec: $hosts
       - exec: jump has_resp_sequence
       
-      # [优化] 智能家居直连逻辑 (最优先)
+      # 智能家居直连逻辑
       - matches: client_ip $user_iot_ip
         exec: $forward_local
       - matches: client_ip $user_iot_ip
