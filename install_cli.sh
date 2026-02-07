@@ -104,12 +104,45 @@ download_rule_init "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubuser
 # 确保这些文件存在，避免 mosdns 启动报错
 touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt,user_iot.txt,local_direct.txt,local_proxy.txt}
 
-# ================= 6. 初始化配置 =================
-echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
+# ================= 6. 配置服务文件 (提前创建) =================
+echo -e "${YELLOW}[6/8] 配置系统服务...${NC}"
+
+# 救援模式服务
+cat > /etc/systemd/system/mosdns-rescue.service <<EOF
+[Unit]
+Description=MosDNS Rescue Mode
+After=network.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mosctl rescue enable
+EOF
+
+# MosDNS 主服务
+cat > /etc/systemd/system/mosdns.service <<EOF
+[Unit]
+Description=MosDNS Service
+After=network.target
+OnFailure=mosdns-rescue.service
+[Service]
+StartLimitInterval=0
+Type=simple
+ExecStartPre=-/usr/local/bin/mosctl rescue disable silent
+ExecStart=/usr/local/bin/mosdns start -d /etc/mosdns
+Restart=on-failure
+RestartSec=3s
+LimitNOFILE=65535
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+
+# ================= 6.5 初始化配置 =================
+echo -e "${YELLOW}[6.5/8] 初始化配置...${NC}"
 /usr/local/bin/mosctl sync || echo -e "${RED}同步配置失败，稍后请手动同步...${NC}"
 
-# ================= 6.5 交互式配置 =================
-echo -e "${YELLOW}[6.5/8] 交互式配置向导...${NC}"
+# ================= 6.8 交互式配置 =================
+echo -e "${YELLOW}[6.8/8] 交互式配置向导...${NC}"
 
 if grep -q "local_dns=" /etc/mosdns/config.yaml; then
     echo "⚠️ 检测到配置文件损坏，正在重置..."
@@ -140,37 +173,6 @@ else
 fi
 
 echo "  - 国内 DNS 已设为: $local_dns"
-
-# ================= 7. Systemd & Crontab =================
-echo -e "${YELLOW}[7/8] 配置服务与自动更新...${NC}"
-
-# 救援模式服务
-cat > /etc/systemd/system/mosdns-rescue.service <<EOF
-[Unit]
-Description=MosDNS Rescue Mode
-After=network.target
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/mosctl rescue enable
-EOF
-
-# MosDNS 主服务
-cat > /etc/systemd/system/mosdns.service <<EOF
-[Unit]
-Description=MosDNS Service
-After=network.target
-OnFailure=mosdns-rescue.service
-[Service]
-StartLimitInterval=0
-Type=simple
-ExecStartPre=-/usr/local/bin/mosctl rescue disable silent
-ExecStart=/usr/local/bin/mosdns start -d /etc/mosdns
-Restart=on-failure
-RestartSec=3s
-LimitNOFILE=65535
-[Install]
-WantedBy=multi-user.target
-EOF
 
 # 自动更新 (每天凌晨 2 点)
 if ! crontab -l 2>/dev/null | grep -q "mosctl update"; then
