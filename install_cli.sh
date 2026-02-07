@@ -7,7 +7,7 @@ REPO_URL="https://github.com/KyleYu2024/MosCtl.git"
 # 默认版本，如果获取不到最新版则回退到此版本
 DEFAULT_MOSDNS_VERSION="v5.3.3"
 # 脚本版本号
-SCRIPT_VERSION="v0.4.1-fix" 
+SCRIPT_VERSION="v0.4.1" 
 # GitHub 加速代理
 GH_PROXY="https://gh-proxy.com/"
 # =========================================
