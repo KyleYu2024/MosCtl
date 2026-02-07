@@ -134,10 +134,13 @@ func serviceMenu(scanner *bufio.Scanner) {
 }
 
 func dnsSettingsMenu(scanner *bufio.Scanner) {
+	local, remote := config.GetCurrentUpstreams()
+	ttl := config.GetCurrentTTL()
+
 	fmt.Println("\n--- DNS 参数设置 ---")
-	fmt.Println("  1. 📡  修改国内上游 DNS")
-	fmt.Println("  2. 🌍  修改国外上游 DNS")
-	fmt.Println("  3. ⏱️  设置缓存 TTL")
+	fmt.Printf("  1. 📡  修改国内上游 DNS (当前: %s)\n", local)
+	fmt.Printf("  2. 🌍  修改国外上游 DNS (当前: %s)\n", remote)
+	fmt.Printf("  3. ⏱️  设置缓存 TTL (当前: %s 秒)\n", ttl)
 	fmt.Println("  4. 🧹  清空 DNS 缓存")
 	fmt.Println("  0. 🔙  返回")
 	fmt.Print("请选择: ")

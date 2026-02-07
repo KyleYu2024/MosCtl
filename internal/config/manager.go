@@ -155,6 +155,43 @@ func FlushCache() error {
 	return service.RestartService()
 }
 
+// GetCurrentUpstreams 返回 (国内DNS, 国外DNS)
+func GetCurrentUpstreams() (string, string) {
+	content, err := os.ReadFile(ConfigPath)
+	if err != nil {
+		return "未知", "未知"
+	}
+	localRegex := regexp.MustCompile(`addr:\s*"([^"]+)"\s*#\s*TAG_LOCAL`)
+	remoteRegex := regexp.MustCompile(`addr:\s*"([^"]+)"\s*#\s*TAG_REMOTE`)
+
+	localMatch := localRegex.FindStringSubmatch(string(content))
+	remoteMatch := remoteRegex.FindStringSubmatch(string(content))
+
+	local := "未知"
+	remote := "未知"
+	if len(localMatch) > 1 {
+		local = localMatch[1]
+	}
+	if len(remoteMatch) > 1 {
+		remote = remoteMatch[1]
+	}
+	return local, remote
+}
+
+// GetCurrentTTL 返回当前缓存 TTL
+func GetCurrentTTL() string {
+	content, err := os.ReadFile(ConfigPath)
+	if err != nil {
+		return "未知"
+	}
+	re := regexp.MustCompile(`lazy_cache_ttl:\s*(\d+)`)
+	match := re.FindStringSubmatch(string(content))
+	if len(match) > 1 {
+		return match[1]
+	}
+	return "未知"
+}
+
 // RunTest 运行 DNS 解析测试
 func RunTest() {
 	fmt.Println("\n🩺 正在进行 DNS 解析诊断...")
