@@ -31,25 +31,25 @@ func showMenu() {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Println("\n\033[0;32m=====================================\033[0m")
-		fmt.Println("\033[0;32m      MosDNS 管理面板 (Go 版)        \033[0m")
+		fmt.Println("\033[0;32mMosDNS 管理面板 (Go 版)\033[0m")
 		fmt.Println("\033[0;32m=====================================\033[0m")
 		
 		status := "🔴 未运行"
 		if exec.Command("systemctl", "is-active", "mosdns").Run() == nil {
 			status = "🟢 运行中"
 		}
-		fmt.Printf(" 状态: %s\n", status)
+		fmt.Printf("状态: %s\n", status)
 		fmt.Println("\033[0;32m=====================================\033[0m")
-		fmt.Println("   1. 🛠️  服务管理 (启动/停止/重启)")
-		fmt.Println("   2. 🔄  同步配置 (Git Pull)")
-		fmt.Println("   3. ⚙️  DNS 参数设置 (上游/缓存/TTL)")
-		fmt.Println("   4. 📝  管理自定义规则")
-		fmt.Println("   5. ⬇️  更新 Geo 数据")
-		fmt.Println("   6. 🚑  救援模式管理")
-		fmt.Println("   7. 📊  查看运行日志")
-		fmt.Println("   8. 🩺  DNS 解析测试")
-		fmt.Println("   9. 🗑️  彻底卸载")
-		fmt.Println("   0. 🚪  退出")
+		fmt.Println("1. 🛠️  服务管理 (启动/停止/重启)")
+		fmt.Println("2. 🔄  同步配置 (Git Pull)")
+		fmt.Println("3. ⚙️  DNS 参数设置 (上游/缓存/TTL)")
+		fmt.Println("4. 📝  管理自定义规则")
+		fmt.Println("5. ⬇️  更新 Geo 数据")
+		fmt.Println("6. 🚑  救援模式管理")
+		fmt.Println("7. 📊  查看运行日志")
+		fmt.Println("8. 🩺  DNS 解析测试")
+		fmt.Println("9. 🗑️  彻底卸载")
+		fmt.Println("0. 🚪  退出")
 		fmt.Println("\033[0;32m=====================================\033[0m")
 		fmt.Print("请选择: ")
 
