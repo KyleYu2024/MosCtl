@@ -102,7 +102,7 @@ download_rule_init "/etc/mosdns/rules/geosite_apple.txt" "https://raw.githubuser
 download_rule_init "/etc/mosdns/rules/geosite_no_cn.txt" "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt"
 
 # 确保这些文件存在，避免 mosdns 启动报错
-touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt,user_iot.txt}
+touch /etc/mosdns/rules/{force-cn.txt,force-nocn.txt,hosts.txt,local-ptr.txt,user_iot.txt,local_direct.txt,local_proxy.txt}
 
 # ================= 6. 初始化配置 =================
 echo -e "${YELLOW}[6/8] 初始化配置...${NC}"
@@ -128,6 +128,7 @@ if [[ "$local_dns" != *"://"* ]]; then local_dns="udp://${local_dns}"; fi
 # 读取国外 DNS (必须填写，否则可能无法分流)
 echo -n "mihomo或其他代理工具的dns监听地址 (例如 10.10.2.252:53，直接回车不修改): "
 if [ -c /dev/tty ]; then read remote_dns < /dev/tty; else read remote_dns; fi
+if [[ -n "$remote_dns" ]] && [[ "$remote_dns" != *"://"* ]]; then remote_dns="udp://${remote_dns}"; fi
 
 # 写入配置
 sed -i "s|\(.*\)- addr:.*# TAG_LOCAL|\1- addr: \"${local_dns}\" # TAG_LOCAL|" /etc/mosdns/config.yaml
