@@ -1,0 +1,25 @@
+[Unit]
+Description=MosDNS Service
+Documentation=https://github.com/IrineSistiana/mosdns
+After=network.target
+# 关键：如果我挂了，触发救援服务
+OnFailure=mosdns-rescue.service
+
+[Service]
+Type=simple
+# 启动前，强制关闭救援模式(NAT转发)，确保流量回切
+ExecStartPre=/usr/local/bin/mosctl rescue disable
+# 启动核心
+ExecStart=/usr/local/bin/mosdns start -d /etc/mosdns
+Restart=on-failure
+RestartSec=5s
+# 1分钟内尝试重启3次，如果都失败，则触发 OnFailure
+StartLimitInterval=60
+StartLimitBurst=3
+
+# 性能调优
+LimitNOFILE=65535
+Environment=GOGC=50
+
+[Install]
+WantedBy=multi-user.target
