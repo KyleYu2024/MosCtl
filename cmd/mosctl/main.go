@@ -4,7 +4,9 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -25,6 +27,7 @@ func main() {
 	time.Local = time.FixedZone("CST", 8*3600)
 	setupRules()
 	setEnv()
+	go startDailyUpdate() // 开启每日更新任务
 
 	// 打印当前启动时间
 	fmt.Printf("[%s] Starting mosctl entrypoint...\n", time.Now().Format("2006-01-02 15:04:05"))
@@ -248,4 +251,50 @@ func ensureValidCacheDump() {
 	gw := gzip.NewWriter(f)
 	gw.Write([]byte("mosdns_cache_v2"))
 	gw.Close()
+}
+
+func startDailyUpdate() {
+	for {
+		updateGeoData()
+		time.Sleep(24 * time.Hour)
+	}
+}
+
+func updateGeoData() {
+	fmt.Printf("[%s] Updating Geo data...\n", time.Now().Format("2006-01-02 15:04:05"))
+	base := "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/"
+	files := map[string]string{
+		"geoip-cn.txt":   filepath.Join(RuleDir, "geoip_cn.txt"),
+		"geosite-cn.txt": filepath.Join(RuleDir, "geosite_cn.txt"),
+	}
+
+	for remote, local := range files {
+		err := downloadFile(base+remote, local)
+		if err != nil {
+			fmt.Printf("  [FAIL] Update %s: %v\n", remote, err)
+		} else {
+			fmt.Printf("  [SUCCESS] Updated %s\n", remote)
+		}
+	}
+}
+
+func downloadFile(url, path string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	out, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	return err
 }

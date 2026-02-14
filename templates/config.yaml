@@ -37,19 +37,26 @@ plugins:
     type: domain_set
     args:
       files:
-        - "/etc/mosdns/rules/local_direct.txt" # Mapped domestic rules
+        - "/etc/mosdns/rules/geosite_cn.txt"   # 自动下载的标准国内域名库
+        - "/etc/mosdns/rules/local_direct.txt" # 您的自定义直连规则
+
+  - tag: geoip_cn
+    type: ip_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geoip_cn.txt"     # 自动下载的标准国内IP库
 
   - tag: geosite_no_cn
     type: domain_set
     args:
       files:
-        - "/etc/mosdns/rules/local_proxy.txt" # Mapped foreign rules
+        - "/etc/mosdns/rules/local_proxy.txt"  # 您的自定义代理规则
 
   - tag: user_iot_ip
     type: ip_set
     args:
       files:
-        - "/etc/mosdns/rules/user_iot.txt" # Mapped IoT rules (IP set)
+        - "/etc/mosdns/rules/user_iot.txt"    # 您的自定义 IoT 规则
 
   - tag: hosts
     type: hosts
@@ -82,6 +89,15 @@ plugins:
     args:
       - exec: prefer_ipv4
       - exec: $forward_remote
+
+  # 兜底 IP 过滤逻辑 (如果是国内 IP，即使没匹配到域名也走国内流)
+  - tag: query_is_non_local_ip
+    type: sequence
+    args:
+      - exec: prefer_ipv4
+      - exec: $cached_local_sequence
+      - matches: "!resp_ip $geoip_cn"
+        exec: drop_resp
 
   # 匹配国内
   - tag: query_is_local_domain
@@ -117,7 +133,11 @@ plugins:
       - exec: $query_is_no_local_domain
       - exec: jump has_resp_sequence
       
-      # 默认 fallback 到国外
+      # 如果以上都没匹配到，尝试先请求国内 DNS，如果是国内 IP 则接受，否则走国外
+      - exec: $query_is_non_local_ip
+      - exec: jump has_resp_sequence
+
+      # 默认走国外
       - exec: $forward_remote_upstream
 
   # ===========================
