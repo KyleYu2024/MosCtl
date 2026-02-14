@@ -1,0 +1,136 @@
+log:
+  level: error
+  file: "" # Log to stdout
+
+api:
+  http: "0.0.0.0:8080"
+
+plugins:
+  # ===========================
+  # 1. 基础插件 (转发/缓存)
+  # ===========================
+  - tag: cache
+    type: cache
+    args:
+      size: 20480
+      lazy_cache_ttl: 604800
+      dump_file: "/etc/mosdns/cache.dump"
+      dump_interval: 600
+
+  - tag: forward_local
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://223.5.5.5" # Default domestic DNS
+          enable_pipeline: true
+
+  - tag: forward_remote
+    type: forward
+    args:
+      upstreams:
+        - addr: "${REMOTE_DNS}" # Foreign DNS from environment variable
+
+  # ===========================
+  # 2. 规则/匹配器
+  # ===========================
+  - tag: geosite_cn
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/local_direct.txt" # Mapped domestic rules
+
+  - tag: geosite_no_cn
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/local_proxy.txt" # Mapped foreign rules
+
+  - tag: user_iot_ip
+    type: ip_set
+    args:
+      files:
+        - "/etc/mosdns/rules/user_iot.txt" # Mapped IoT rules (IP set)
+
+  - tag: hosts
+    type: hosts
+    args:
+      files:
+        - "/etc/mosdns/rules/hosts.txt"
+
+  # ===========================
+  # 3. 辅助处理序列
+  # ===========================
+  
+  - tag: has_resp_sequence
+    type: sequence
+    args:
+      - matches: has_resp
+        exec: accept
+
+  # 国内流 (带缓存)
+  - tag: cached_local_sequence
+    type: sequence
+    args:
+      - exec: $cache
+      - matches: has_resp
+        exec: accept
+      - exec: $forward_local
+
+  # 国外流
+  - tag: forward_remote_upstream
+    type: sequence
+    args:
+      - exec: prefer_ipv4
+      - exec: $forward_remote
+
+  # 匹配国内
+  - tag: query_is_local_domain
+    type: sequence
+    args:
+      - matches: qname $geosite_cn
+        exec: $cached_local_sequence
+
+  # 匹配国外
+  - tag: query_is_no_local_domain
+    type: sequence
+    args:
+      - matches: qname $geosite_no_cn
+        exec: $forward_remote_upstream
+
+  # ===========================
+  # 4. 主入口
+  # ===========================
+  - tag: main_sequence
+    type: sequence
+    args:
+      - exec: $hosts
+      - exec: jump has_resp_sequence
+      
+      # 智能家居直连
+      - matches: client_ip $user_iot_ip
+        exec: $forward_local
+      - matches: client_ip $user_iot_ip
+        exec: accept
+
+      - exec: $query_is_local_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_no_local_domain
+      - exec: jump has_resp_sequence
+      
+      # 默认 fallback 到国外
+      - exec: $forward_remote_upstream
+
+  # ===========================
+  # 5. 服务监听
+  # ===========================
+  - tag: udp_server
+    type: udp_server
+    args:
+      entry: main_sequence
+      listen: ":53"
+
+  - tag: tcp_server
+    type: tcp_server
+    args:
+      entry: main_sequence
+      listen: ":53"
