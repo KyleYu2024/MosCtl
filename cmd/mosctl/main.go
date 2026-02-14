@@ -241,11 +241,12 @@ func renderConfig() {
 
 func ensureValidCacheDump() {
 	dumpPath := "/etc/mosdns/cache.dump"
-	if _, err := os.Stat(dumpPath); err == nil {
-		return // 文件已存在，跳过
+	// 如果文件已经存在且大小大于 20 字节（说明可能有数据），则不覆盖
+	if info, err := os.Stat(dumpPath); err == nil && info.Size() > 20 {
+		return
 	}
 
-	// 创建一个合法的空 Gzip 文件
+	// 创建一个合法的空 MosDNS v2 缓存文件
 	f, err := os.Create(dumpPath)
 	if err != nil {
 		return
@@ -253,8 +254,8 @@ func ensureValidCacheDump() {
 	defer f.Close()
 
 	gw := gzip.NewWriter(f)
-	gw.Write([]byte("mosdns_cache_v2"))
-	gw.Close()
+	_, _ = gw.Write([]byte("mosdns_cache_v2"))
+	_ = gw.Close()
 }
 
 func startDailyUpdateLoop() {
