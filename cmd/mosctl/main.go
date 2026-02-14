@@ -261,19 +261,33 @@ func startDailyUpdate() {
 }
 
 func updateGeoData() {
-	fmt.Printf("[%s] Updating Geo data...\n", time.Now().Format("2006-01-02 15:04:05"))
-	base := "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/"
+	fmt.Printf("[%s] Updating Geo data (using CN mirrors)...\n", time.Now().Format("2006-01-02 15:04:05"))
+	
+	// 使用国内常用的 GitHub 代理加速源
+	mirrors := []string{
+		"https://mirror.ghproxy.com/https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/",
+		"https://ghp.ci/https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/",
+	}
+	
 	files := map[string]string{
 		"geoip-cn.txt":   filepath.Join(RuleDir, "geoip_cn.txt"),
 		"geosite-cn.txt": filepath.Join(RuleDir, "geosite_cn.txt"),
 	}
 
 	for remote, local := range files {
-		err := downloadFile(base+remote, local)
-		if err != nil {
-			fmt.Printf("  [FAIL] Update %s: %v\n", remote, err)
-		} else {
-			fmt.Printf("  [SUCCESS] Updated %s\n", remote)
+		success := false
+		for _, base := range mirrors {
+			err := downloadFile(base+remote, local)
+			if err == nil {
+				fmt.Printf("  [SUCCESS] Updated %s from mirror\n", remote)
+				success = true
+				break
+			}
+			fmt.Printf("  [RETRY] Mirror failed for %s, trying next...\n", remote)
+		}
+		
+		if !success {
+			fmt.Printf("  [WARN] All mirrors failed for %s. Using existing/placeholder file.\n", remote)
 		}
 	}
 }
