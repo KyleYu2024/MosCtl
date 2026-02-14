@@ -27,7 +27,11 @@ func main() {
 	time.Local = time.FixedZone("CST", 8*3600)
 	setupRules()
 	setEnv()
-	go startDailyUpdate() // 开启每日更新任务
+	
+	// 第一次更新改为同步执行，确保启动时文件存在
+	updateGeoData()
+	
+	go startDailyUpdateLoop() // 之后改为后台轮询
 
 	// 打印当前启动时间
 	fmt.Printf("[%s] Starting mosctl entrypoint...\n", time.Now().Format("2006-01-02 15:04:05"))
@@ -82,7 +86,7 @@ func main() {
 
 func setupRules() {
 	os.MkdirAll(RuleDir, 0755)
-	files := []string{"local_direct.txt", "local_proxy.txt", "user_iot.txt", "hosts.txt"}
+	files := []string{"local_direct.txt", "local_proxy.txt", "user_iot.txt", "hosts.txt", "geosite_cn.txt", "geoip_cn.txt"}
 	for _, f := range files {
 		path := filepath.Join(RuleDir, f)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -253,20 +257,19 @@ func ensureValidCacheDump() {
 	gw.Close()
 }
 
-func startDailyUpdate() {
+func startDailyUpdateLoop() {
 	for {
-		updateGeoData()
 		time.Sleep(24 * time.Hour)
+		updateGeoData()
 	}
 }
 
 func updateGeoData() {
-	fmt.Printf("[%s] Updating Geo data (using CN mirrors)...\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Printf("[%s] Checking for Geo data updates...\n", time.Now().Format("2006-01-02 15:04:05"))
 	
-	// 使用国内常用的 GitHub 代理加速源
 	mirrors := []string{
+		"https://ghproxy.net/https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/",
 		"https://mirror.ghproxy.com/https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/",
-		"https://ghp.ci/https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/",
 	}
 	
 	files := map[string]string{

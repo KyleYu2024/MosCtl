@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o mosctl ./cmd/mosctl
 # Final stage
 FROM alpine:latest
 
-# 强制设置时区环境变量
+# Environment
 ENV TZ=Asia/Shanghai
 
 # Prepare directories
@@ -26,7 +26,9 @@ COPY templates/config.yaml /etc/mosdns/config.yaml.template
 RUN touch /etc/mosdns/rules/local_direct.txt \
     /etc/mosdns/rules/local_proxy.txt \
     /etc/mosdns/rules/user_iot.txt \
-    /etc/mosdns/rules/hosts.txt
+    /etc/mosdns/rules/hosts.txt \
+    /etc/mosdns/rules/geosite_cn.txt \
+    /etc/mosdns/rules/geoip_cn.txt
 
 # Expose DNS port
 EXPOSE 53/udp 53/tcp 8080/tcp
