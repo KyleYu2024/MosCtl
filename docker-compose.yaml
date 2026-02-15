@@ -1,16 +1,6 @@
 services:
   mosctl:
     image: kyleyu2024/mosctl:latest
-    platform: linux/amd64
-    container_name: mosctl
-    restart: unless-stopped
-    ports:
-      - "53:53/udp"
-    environment:
-      REMOTE_DNS: "udp://10.10.1.3:53"
-services:
-  mosctl:
-    image: kyleyu2024/mosctl:latest
     container_name: mosctl
     restart: unless-stopped
     ports:
