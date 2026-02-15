@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -27,6 +29,9 @@ func main() {
 	setEnv()
 
 	fmt.Printf("[%s] MosCtl Entrypoint Initialized.\n", time.Now().Format("2006-01-02 15:04:05"))
+
+	// 启动定时更新任务 (每天 02:30)
+	go startScheduledUpdate()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -86,6 +91,70 @@ func setEnv() {
 	}
 }
 
+func startScheduledUpdate() {
+	for {
+		now := time.Now()
+		// 计算距离下次 02:30 的时间
+		next := time.Date(now.Year(), now.Month(), now.Day(), 2, 30, 0, 0, now.Location())
+		if now.After(next) {
+			next = next.Add(24 * time.Hour)
+		}
+		
+		fmt.Printf("[%s] Next Geo data update scheduled at %s\n", 
+			time.Now().Format("2006-01-02 15:04:05"), 
+			next.Format("2006-01-02 15:04:05"))
+		
+		time.Sleep(time.Until(next))
+		updateGeoData()
+	}
+}
+
+func updateGeoData() {
+	fmt.Printf("[%s] Scheduled update started (ghproxy.net)...\n", time.Now().Format("2006-01-02 15:04:05"))
+	
+	base := "https://ghproxy.net/https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/"
+	files := map[string]string{
+		"geoip-cn.txt":   filepath.Join(RuleDir, "geoip_cn.txt"),
+		"geosite-cn.txt": filepath.Join(RuleDir, "geosite_cn.txt"),
+	}
+
+	for remote, local := range files {
+		err := downloadFile(base+remote, local)
+		if err != nil {
+			fmt.Printf("  [WARN] Failed to update %s: %v\n", remote, err)
+		} else {
+			fmt.Printf("  [SUCCESS] Updated %s\n", remote)
+		}
+	}
+}
+
+func downloadFile(url, path string) error {
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	out, err := os.Create(path + ".tmp")
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return err
+	}
+	
+	out.Close()
+	return os.Rename(path+".tmp", path)
+}
+
 func renderConfig() {
 	templatePath := "/etc/mosdns/config.yaml.template"
 	targetPath := "/etc/mosdns/config.yaml"
@@ -96,8 +165,6 @@ func renderConfig() {
 
 	rendered := strings.ReplaceAll(string(content), "${REMOTE_DNS}", os.Getenv("REMOTE_DNS"))
 
-	// 核心优化：如果缓存文件还没生成或者不合法，直接在配置中注销 dump_file，彻底消除报错
-	// 我们检查文件大小，如果小于 100 字节（合法的缓存通常很大），就认为还没准备好
 	hasValidCache := false
 	if info, err := os.Stat(dumpPath); err == nil && info.Size() > 100 {
 		hasValidCache = true
@@ -107,7 +174,6 @@ func renderConfig() {
 	var finalLines []string
 	for _, line := range lines {
 		if strings.Contains(line, "dump_file:") && !hasValidCache {
-			// 如果缓存不合法，注释掉这一行，MosDNS 就不会尝试加载它
 			finalLines = append(finalLines, "      # dump_file: \"/etc/mosdns/cache.dump\" (hidden to avoid errors)")
 		} else {
 			finalLines = append(finalLines, line)
@@ -122,7 +188,6 @@ func runConnectivityTest() {
 	fmt.Println("\n🩺 Running DNS connectivity diagnostic...")
 	
 	test := func(domain, server string) {
-		// 提取 IP/主机名，去掉协议前缀和端口（nslookup 标准用法）
 		host := server
 		if strings.Contains(host, "://") {
 			host = strings.Split(host, "://")[1]
