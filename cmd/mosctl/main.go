@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"os"
@@ -121,31 +120,29 @@ func renderConfig() {
 
 func runConnectivityTest() {
 	fmt.Println("\n🩺 Running DNS connectivity diagnostic...")
+	
 	test := func(domain, server string) {
-		serverAddr := server
-		if strings.Contains(serverAddr, "://") {
-			serverAddr = strings.Split(serverAddr, "://")[1]
+		// 提取 IP/主机名，去掉协议前缀和端口（nslookup 标准用法）
+		host := server
+		if strings.Contains(host, "://") {
+			host = strings.Split(host, "://")[1]
 		}
-		if !strings.Contains(serverAddr, ":") {
-			serverAddr = serverAddr + ":53"
+		if strings.Contains(host, ":") {
+			host = strings.Split(host, ":")[0]
 		}
-		r := &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 3 * time.Second}
-				return d.DialContext(ctx, "udp", serverAddr)
-			},
-		}
-		start := time.Now()
-		ips, err := r.LookupHost(context.Background(), domain)
-		if err == nil && len(ips) > 0 {
-			fmt.Printf("  [PASS] %-15s via %-15s (%v)\n", domain, serverAddr, time.Since(start).Round(time.Millisecond))
-		} else {
-			fmt.Printf("  [FAIL] %-15s via %-15s\n", domain, serverAddr)
-		}
+
+		fmt.Printf(">> nslookup %s %s\n", domain, host)
+		cmd := exec.Command("nslookup", domain, host)
+		output, _ := cmd.CombinedOutput()
+		fmt.Println(string(output))
 	}
-	test("www.baidu.com", "223.5.5.5:53")
-	test("www.google.com", os.Getenv("REMOTE_DNS"))
+
+	test("baidu.com", "223.5.5.5")
+	remote := os.Getenv("REMOTE_DNS")
+	if remote == "" {
+		remote = DefaultRemote
+	}
+	test("google.com", remote)
 	fmt.Println()
 }
 
