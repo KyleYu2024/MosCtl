@@ -30,6 +30,9 @@ func main() {
 
 	fmt.Printf("[%s] MosCtl Entrypoint Initialized.\n", time.Now().Format("2006-01-02 15:04:05"))
 
+	// 首次启动时检查并更新 Geo 数据
+	ensureGeoData()
+
 	// 启动定时更新任务 (每天 02:30)
 	go startScheduledUpdate()
 
@@ -75,12 +78,37 @@ func main() {
 }
 
 func setupRules() {
-	os.MkdirAll(RuleDir, 0755)
+	fmt.Printf("[%s] Initializing rules in: %s\n", time.Now().Format("2006-01-02 15:04:05"), RuleDir)
+	
+	if err := os.MkdirAll(RuleDir, 0755); err != nil {
+		fmt.Printf("❌ ERROR: Failed to create/access RuleDir %s: %v\n", RuleDir, err)
+	}
+
+	// 基础规则文件
 	files := []string{"local_direct.txt", "local_proxy.txt", "user_iot.txt", "hosts.txt", "geosite_cn.txt", "geoip_cn.txt"}
 	for _, f := range files {
 		path := filepath.Join(RuleDir, f)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			os.WriteFile(path, []byte("# Placeholder\n"), 0644)
+			fmt.Printf("  >> Creating missing rule: %s\n", f)
+			if err := os.WriteFile(path, []byte("# Placeholder\n"), 0644); err != nil {
+				fmt.Printf("  ❌ ERROR creating %s: %v\n", f, err)
+			}
+		}
+	}
+
+	// 自动恢复 config.yaml 到挂载的目录
+	userConfigPath := filepath.Join(RuleDir, "config.yaml")
+	backupPath := "/etc/mosctl/config.yaml.template"
+	if _, err := os.Stat(userConfigPath); os.IsNotExist(err) {
+		fmt.Printf("  >> config.yaml not found, restoring from %s\n", backupPath)
+		if input, err := os.ReadFile(backupPath); err == nil {
+			if err := os.WriteFile(userConfigPath, input, 0644); err != nil {
+				fmt.Printf("  ❌ ERROR restoring config.yaml: %v\n", err)
+			} else {
+				fmt.Println("  ✅ Successfully restored config.yaml")
+			}
+		} else {
+			fmt.Printf("  ❌ ERROR: Backup template missing: %v\n", err)
 		}
 	}
 }
@@ -109,21 +137,47 @@ func startScheduledUpdate() {
 	}
 }
 
-func updateGeoData() {
-	fmt.Printf("[%s] Scheduled update started (ghproxy.net)...\n", time.Now().Format("2006-01-02 15:04:05"))
+func ensureGeoData() {
+	files := []string{
+		filepath.Join(RuleDir, "geoip_cn.txt"),
+		filepath.Join(RuleDir, "geosite_cn.txt"),
+	}
 	
-	base := "https://ghproxy.net/https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/"
+	needsUpdate := false
+	for _, f := range files {
+		info, err := os.Stat(f)
+		if err != nil || info.Size() < 100 {
+			needsUpdate = true
+			break
+		}
+		// 检查内容是否包含 "404"
+		content, _ := os.ReadFile(f)
+		if strings.Contains(string(content), "404: Not Found") {
+			needsUpdate = true
+			break
+		}
+	}
+
+	if needsUpdate {
+		fmt.Printf("[%s] Geo data missing or invalid, updating now...\n", time.Now().Format("2006-01-02 15:04:05"))
+		updateGeoData()
+	}
+}
+
+func updateGeoData() {
+	fmt.Printf("[%s] Updating Geo data (ghproxy.net)...\n", time.Now().Format("2006-01-02 15:04:05"))
+	
 	files := map[string]string{
-		"geoip-cn.txt":   filepath.Join(RuleDir, "geoip_cn.txt"),
-		"geosite-cn.txt": filepath.Join(RuleDir, "geosite_cn.txt"),
+		"https://ghproxy.net/https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt":        filepath.Join(RuleDir, "geoip_cn.txt"),
+		"https://ghproxy.net/https://raw.githubusercontent.com/Loyalsoldier/domain-list-custom/release/cn.txt": filepath.Join(RuleDir, "geosite_cn.txt"),
 	}
 
 	for remote, local := range files {
-		err := downloadFile(base+remote, local)
+		err := downloadFile(remote, local)
 		if err != nil {
 			fmt.Printf("  [WARN] Failed to update %s: %v\n", remote, err)
 		} else {
-			fmt.Printf("  [SUCCESS] Updated %s\n", remote)
+			fmt.Printf("  [SUCCESS] Updated %s\n", filepath.Base(local))
 		}
 	}
 }
@@ -156,13 +210,17 @@ func downloadFile(url, path string) error {
 }
 
 func renderConfig() {
-	templatePath := "/etc/mosdns/config.yaml.template"
+	userConfigPath := filepath.Join(RuleDir, "config.yaml")
 	targetPath := "/etc/mosdns/config.yaml"
 	dumpPath := "/etc/mosdns/cache.dump"
 
-	content, err := os.ReadFile(templatePath)
-	if err != nil { return }
+	content, err := os.ReadFile(userConfigPath)
+	if err != nil { 
+		fmt.Printf("❌ ERROR: Failed to read user config at %s: %v\n", userConfigPath, err)
+		return 
+	}
 
+	fmt.Printf("✅ Loading config from: %s\n", userConfigPath)
 	rendered := strings.ReplaceAll(string(content), "${REMOTE_DNS}", os.Getenv("REMOTE_DNS"))
 
 	hasValidCache := false
@@ -185,7 +243,7 @@ func renderConfig() {
 }
 
 func runConnectivityTest() {
-	fmt.Println("\n🩺 Running DNS connectivity diagnostic...")
+	fmt.Printf("[%s] 🩺 Running DNS connectivity diagnostic...\n", time.Now().Format("2006-01-02 15:04:05"))
 	
 	test := func(domain, server string) {
 		host := server
@@ -196,10 +254,27 @@ func runConnectivityTest() {
 			host = strings.Split(host, ":")[0]
 		}
 
-		fmt.Printf(">> nslookup %s %s\n", domain, host)
+		fmt.Printf("  >> Testing %s via %s... ", domain, host)
 		cmd := exec.Command("nslookup", domain, host)
-		output, _ := cmd.CombinedOutput()
-		fmt.Println(string(output))
+		output, err := cmd.CombinedOutput()
+		
+		if err != nil {
+			fmt.Printf("❌ FAILED\n     Error: %v\n     Output: %s\n", err, strings.TrimSpace(string(output)))
+		} else {
+			outStr := strings.TrimSpace(string(output))
+			if strings.Contains(outStr, "Address") {
+				fmt.Println("✅ OK")
+				// 打印简短的解析结果
+				lines := strings.Split(outStr, "\n")
+				for _, line := range lines {
+					if strings.Contains(line, "Address") && !strings.Contains(line, "#") {
+						fmt.Printf("     %s\n", strings.TrimSpace(line))
+					}
+				}
+			} else {
+				fmt.Printf("❓ UNKNOWN\n     Output: %s\n", outStr)
+			}
+		}
 	}
 
 	test("baidu.com", "223.5.5.5")

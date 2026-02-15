@@ -12,6 +12,9 @@ FROM alpine:latest
 # Environment
 ENV TZ=Asia/Shanghai
 
+# Install dependencies
+RUN apk add --no-cache bind-tools ca-certificates
+
 # Prepare directories
 RUN mkdir -p /etc/mosdns/rules
 
@@ -20,7 +23,8 @@ COPY mosdns /usr/local/bin/
 COPY --from=builder /app/mosctl /usr/local/bin/
 
 # Copy default config template
-COPY templates/config.yaml /etc/mosdns/config.yaml.template
+RUN mkdir -p /etc/mosctl
+COPY templates/config.yaml /etc/mosctl/config.yaml.template
 
 # Create placeholder files
 RUN touch /etc/mosdns/rules/local_direct.txt \

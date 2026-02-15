@@ -1,19 +1,28 @@
 services:
   mosctl:
     image: kyleyu2024/mosctl:latest
+    platform: linux/amd64
     container_name: mosctl
     restart: unless-stopped
     ports:
       - "53:53/udp"
     environment:
-      REMOTE_DNS: "udp://10.10.1.3:53" # 代理软件的 DNS 监听端口
+      REMOTE_DNS: "udp://10.10.1.3:53"
+services:
+  mosctl:
+    image: kyleyu2024/mosctl:latest
+    container_name: mosctl
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+    environment:
+      REMOTE_DNS: "udp://10.10.1.3:53" #代理软件的dns监听端口
     volumes:
       - ./rules:/etc/mosdns/rules
     networks:
-      my_macvlan:
+      my_macvlan:   # 这里的名字和下面 networks 里的对应
         ipv4_address: 10.10.1.203
-
 networks:
-  my_macvlan:
+  my_macvlan:  # 和上面的对应
     external: true
     name: macvlan
