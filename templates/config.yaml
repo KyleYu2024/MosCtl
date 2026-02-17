@@ -1,0 +1,241 @@
+log:
+  level: warn
+  file: "/var/log/mosdns.log"
+
+plugins:
+  # ===========================
+  # 1. 基础插件 (转发/缓存)
+  # ===========================
+  - tag: cache
+    type: cache
+    args:
+      size: 20480
+      lazy_cache_ttl: 86400
+      dump_file: "/etc/mosdns/cache.dump"
+      dump_interval: 600
+
+  - tag: forward_local
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://119.29.29.29" # TAG_LOCAL
+          enable_pipeline: true
+
+  - tag: forward_remote
+    type: forward
+    args:
+      upstreams:
+        - addr: "udp://8.8.8.8" # TAG_REMOTE
+
+  # ===========================
+  # 2. 规则/匹配器
+  # ===========================
+  - tag: geosite_cn
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geosite_cn.txt"
+        - "/etc/mosdns/rules/force-cn.txt"
+
+  - tag: geoip_cn
+    type: ip_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geoip_cn.txt"
+
+  - tag: geosite_apple
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geosite_apple.txt"
+
+  - tag: geosite_no_cn
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rules/geosite_no_cn.txt"
+        - "/etc/mosdns/rules/force-nocn.txt"
+
+  - tag: hosts
+    type: hosts
+    args:
+      files:
+        - "/etc/mosdns/rules/hosts.txt"
+
+  # [新增兼容] 智能家居规则
+  - tag: user_iot_ip
+    type: ip_set
+    args:
+      files:
+        - "/etc/mosdns/rules/user_iot.txt"
+
+  # ===========================
+  # 3. 辅助处理序列 (基于 0.3.7 稳定逻辑)
+  # ===========================
+  
+  - tag: has_resp_sequence
+    type: sequence
+    args:
+      - matches: has_resp
+        exec: accept
+
+  # ECS 处理
+  - tag: ecs_cn
+    type: ecs_handler
+    args:
+      forward: false
+      preset: 119.29.29.29
+      send: false
+      mask4: 24
+
+  - tag: no_ecs
+    type: ecs_handler
+    args:
+      forward: false
+      preset: ""
+      send: false
+
+  # 国内流 (带缓存)
+  - tag: cached_local_sequence
+    type: sequence
+    args:
+      - exec: $cache
+      - matches: has_resp
+        exec: accept
+      - exec: $forward_local
+
+  # 国外流 (无缓存)
+  - tag: forward_remote_upstream
+    type: sequence
+    args:
+      - exec: $no_ecs
+      - exec: prefer_ipv4
+      - exec: $forward_remote
+
+  # 兜底 IP 过滤逻辑
+  - tag: query_is_non_local_ip
+    type: sequence
+    args:
+      - exec: $ecs_cn
+      - exec: prefer_ipv4
+      - exec: $cached_local_sequence
+      - matches: "!resp_ip $geoip_cn"
+        exec: drop_resp
+
+  # Apple Fallback
+  - tag: apple_domain_fallback
+    type: fallback
+    args:
+      primary: query_is_non_local_ip
+      secondary: cached_local_sequence
+      threshold: 100
+      always_standby: true
+
+  # 匹配 Apple
+  - tag: query_is_apple_domain
+    type: sequence
+    args:
+      - matches: qname $geosite_apple
+        exec: $apple_domain_fallback
+
+  # 匹配国内
+  - tag: query_is_local_domain
+    type: sequence
+    args:
+      - matches: qname $geosite_cn
+        exec: $cached_local_sequence
+
+  # 匹配国外
+  - tag: query_is_no_local_domain
+    type: sequence
+    args:
+      - matches: qname $geosite_no_cn
+        exec: $forward_remote_upstream
+
+  # 拒绝名单
+  - tag: query_is_reject_domain
+    type: sequence
+    args:
+      - matches: qtype 65
+        exec: reject 3
+
+  # ===========================
+  # 4. 主入口 (基于 0.3.7 稳定结构)
+  # ===========================
+  - tag: main_sequence
+    type: sequence
+    args:
+      - exec: $hosts
+      - exec: jump has_resp_sequence
+      
+      # 智能家居直连
+      - matches: client_ip $user_iot_ip
+        exec: $forward_local
+      - matches: client_ip $user_iot_ip
+        exec: accept
+
+      - exec: $query_is_apple_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_reject_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_local_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_no_local_domain
+      - exec: jump has_resp_sequence
+      - exec: $forward_remote_upstream
+
+  # ===========================
+  # 5. 服务监听
+  # ===========================
+  - tag: udp_server
+    type: udp_server
+    args:
+      entry: main_sequence
+      listen: ":53"
+
+  - tag: tcp_server
+    type: tcp_server
+    args:
+      entry: main_sequence
+      listen: ":53"
+
+
+  # ===========================
+  # 4. 主入口 (基于 0.3.7 稳定结构)
+  # ===========================
+  - tag: main_sequence
+    type: sequence
+    args:
+      - exec: $hosts
+      - exec: jump has_resp_sequence
+      
+      # 智能家居直连
+      - matches: client_ip $user_iot_ip
+        exec: $forward_local
+      - matches: client_ip $user_iot_ip
+        exec: accept
+
+      - exec: $query_is_apple_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_reject_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_local_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_no_local_domain
+      - exec: jump has_resp_sequence
+      - exec: $forward_remote_upstream
+
+  # ===========================
+  # 5. 服务监听
+  # ===========================
+  - tag: udp_server
+    type: udp_server
+    args:
+      entry: main_sequence
+      listen: ":53"
+
+  - tag: tcp_server
+    type: tcp_server
+    args:
+      entry: main_sequence
+      listen: ":53"
