@@ -10,7 +10,7 @@ plugins:
     type: cache
     args:
       size: 20480
-      lazy_cache_ttl: 86400
+      lazy_cache_ttl: 3600
       dump_file: "/etc/mosdns/cache.dump"
       dump_interval: 600
 
