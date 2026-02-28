@@ -1,0 +1,29 @@
+# Binaries
+/mosctl
+/mosdns
+mosctl-*
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Mac System
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and Temp
+*.log
+*.tmp
+/dist/
+/tmp/
+
+# Go
+go.work*.tar
+mosdns_from_image
