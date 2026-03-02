@@ -31,7 +31,7 @@ func init() {
 
 func runDockerPanel() {
 	fmt.Println("=====================================")
-	fmt.Println("             MosCtl Docker (v0.4.2)  ")
+	fmt.Println("             MosCtl Docker (v0.4.3)  ")
 	fmt.Println("=====================================")
 
 	os.Setenv("MOSCTL_MODE", "docker")

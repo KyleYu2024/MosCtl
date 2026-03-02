@@ -279,6 +279,11 @@ func updateConfig(fn func(root *yaml.Node) error) error {
 		return err
 	}
 
+	// 核心优化：如果内容一致，直接返回，不触发重启
+	if bytes.Equal(data, updatedData) {
+		return nil
+	}
+
 	tmpFile := ConfigPath + ".tmp"
 	if err := os.WriteFile(tmpFile, updatedData, 0644); err != nil {
 		return err
