@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,12 +18,22 @@ import (
 )
 
 const (
-	ConfigPath = "/etc/mosdns/config.yaml"
-	RuleDir    = "/etc/mosdns/rules"
-	MosDNSBin  = "/usr/local/bin/mosdns"
+	ConfigPath     = "/etc/mosdns/config.yaml"
+	RuleDir        = "/etc/mosdns/rules"
+	MosDNSBin      = "/usr/local/bin/mosdns"
+	StatsHistoryPath = "/etc/mosdns/stats_history.json"
 )
 
-// GetCacheStats 获取缓存统计信息
+// PersistentStats 存储历史累加数据
+type PersistentStats struct {
+	QueryTotal float64 `json:"query_total"`
+	HitTotal   float64 `json:"hit_total"`
+	MissTotal  float64 `json:"miss_total"`
+	LazyTotal  float64 `json:"lazy_total"`
+	UpdatedAt  int64   `json:"updated_at"`
+}
+
+// GetCacheStats 获取缓存统计信息 (包含历史累加)
 func GetCacheStats() (string, error) {
 	resp, err := http.Get("http://127.0.0.1:8080/metrics")
 	if err != nil {
@@ -35,46 +47,100 @@ func GetCacheStats() (string, error) {
 	}
 
 	metrics := string(body)
-	query := findMetric(metrics, "mosdns_cache_query_total")
-	hit := findMetric(metrics, "mosdns_cache_hit_total")
-	miss := findMetric(metrics, "mosdns_cache_miss_total")
-	lazy := findMetric(metrics, "mosdns_cache_lazy_hit_total")
+	q_curr, _ := strconv.ParseFloat(findMetric(metrics, "mosdns_cache_query_total"), 64)
+	h_curr, _ := strconv.ParseFloat(findMetric(metrics, "mosdns_cache_hit_total"), 64)
+	m_curr, _ := strconv.ParseFloat(findMetric(metrics, "mosdns_cache_miss_total"), 64)
+	l_curr, _ := strconv.ParseFloat(findMetric(metrics, "mosdns_cache_lazy_hit_total"), 64)
 
-	if query == "0" && hit == "0" && miss == "0" {
+	// 读取历史数据
+	hist := loadHistory()
+
+	// 最终显示值 = 当前活跃值 + 历史值
+	q_total := q_curr + hist.QueryTotal
+	h_total := h_curr + hist.HitTotal
+	m_total := m_curr + hist.MissTotal
+	l_total := l_curr + hist.LazyTotal
+
+	if q_total == 0 && h_total == 0 && m_total == 0 {
 		return "暂无缓存数据 (统计可能尚未开始)", nil
 	}
 
-	q, _ := strconv.ParseFloat(query, 64)
-	h, _ := strconv.ParseFloat(hit, 64)
-	m, _ := strconv.ParseFloat(miss, 64)
-	l, _ := strconv.ParseFloat(lazy, 64)
-
-	// 如果 query_total 为 0，尝试用 hit + miss 作为总数 (兼容旧版或不同配置)
-	total := q
-	if total == 0 {
-		total = h + m
+	// 计算分母
+	div := q_total
+	if div == 0 {
+		div = h_total + m_total
 	}
 
 	rate := 0.0
-	if total > 0 {
-		rate = (h / total) * 100
+	if div > 0 {
+		rate = (h_total / div) * 100
 	}
 
 	// 构造详细输出
-	res := fmt.Sprintf("命中: %s", hit)
-	if l > 0 {
-		res += fmt.Sprintf(" (含乐观命中: %s)", lazy)
+	res := fmt.Sprintf("命中: %.0f", h_total)
+	if l_total > 0 {
+		res += fmt.Sprintf(" (含乐观命中: %.0f)", l_total)
 	}
 	
-	// 如果 query_total 存在且不等于 hit+miss，打印 query_total 更有参考价值
-	if q > 0 {
-		res += fmt.Sprintf(" | 总请求: %s", query)
+	if q_total > 0 {
+		res += fmt.Sprintf(" | 总请求: %.0f", q_total)
 	} else {
-		res += fmt.Sprintf(" | 未命中: %s", miss)
+		res += fmt.Sprintf(" | 未命中: %.0f", m_total)
 	}
 	
 	res += fmt.Sprintf(" | 命中率: %.2f%%", rate)
 	return res, nil
+}
+
+// SaveCurrentStatsToHistory 在重启前保存当前活跃统计到历史记录
+func SaveCurrentStatsToHistory() {
+	resp, err := http.Get("http://127.0.0.1:8080/metrics")
+	if err != nil {
+		return // 可能是进程已经退出了，直接放弃
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	metrics := string(body)
+
+	q, _ := strconv.ParseFloat(findMetric(metrics, "mosdns_cache_query_total"), 64)
+	h, _ := strconv.ParseFloat(findMetric(metrics, "mosdns_cache_hit_total"), 64)
+	m, _ := strconv.ParseFloat(findMetric(metrics, "mosdns_cache_miss_total"), 64)
+	l, _ := strconv.ParseFloat(findMetric(metrics, "mosdns_cache_lazy_hit_total"), 64)
+
+	if q == 0 && h == 0 && m == 0 {
+		return // 没有产生任何新统计，无需保存
+	}
+
+	hist := loadHistory()
+	hist.QueryTotal += q
+	hist.HitTotal += h
+	hist.MissTotal += m
+	hist.LazyTotal += l
+	hist.UpdatedAt = time.Now().Unix()
+
+	saveHistory(hist)
+}
+
+func loadHistory() PersistentStats {
+	var hist PersistentStats
+	data, err := os.ReadFile(StatsHistoryPath)
+	if err == nil {
+		json.Unmarshal(data, &hist)
+	}
+	return hist
+}
+
+func saveHistory(hist PersistentStats) error {
+	data, err := json.MarshalIndent(hist, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(StatsHistoryPath, data, 0644)
+}
+
+func ClearHistory() {
+	os.Remove(StatsHistoryPath)
 }
 
 func findMetric(metrics, name string) string {
@@ -113,6 +179,11 @@ func updateConfigSilent(fn func(root *yaml.Node) error) error {
 	updatedData, err := yaml.Marshal(&root)
 	if err != nil {
 		return err
+	}
+
+	// 核心优化：对比内容，如果一致则不写入，避免触发 fsnotify 重启
+	if bytes.Equal(data, updatedData) {
+		return nil
 	}
 
 	tmpFile := ConfigPath + ".tmp"
@@ -333,6 +404,7 @@ func SetCacheTTL(ttl string) error {
 func FlushCache() error {
 	fmt.Println("🧹 正在清空 DNS 缓存...")
 	os.Remove("/etc/mosdns/cache.dump")
+	ClearHistory()
 	return service.RestartService()
 }
 

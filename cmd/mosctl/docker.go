@@ -31,7 +31,7 @@ func init() {
 
 func runDockerPanel() {
 	fmt.Println("=====================================")
-	fmt.Println("             MosCtl Docker (v0.3.9)  ")
+	fmt.Println("             MosCtl Docker (v0.4.2)  ")
 	fmt.Println("=====================================")
 
 	os.Setenv("MOSCTL_MODE", "docker")
@@ -127,6 +127,7 @@ func processManager(ctx context.Context) {
 		case <-ctx.Done():
 			if mosdnsCmd != nil && mosdnsCmd.Process != nil {
 				fmt.Println("🛑 正在终止 MosDNS 进程...")
+				config.SaveCurrentStatsToHistory()
 				mosdnsCmd.Process.Signal(syscall.SIGTERM)
 			}
 			return
@@ -149,14 +150,19 @@ func processManager(ctx context.Context) {
 			select {
 			case err := <-done:
 				fmt.Printf("[%s] ⚠️  MosDNS 进程已退出 (err: %v)\n", time.Now().Format("2006-01-02 15:04:05"), err)
+				// 异常退出也保存一下当前数据
+				config.SaveCurrentStatsToHistory()
 				time.Sleep(1 * time.Second)
 			case <-service.DockerRestartChan:
 				fmt.Printf("[%s] 🔄 收到重启信号，正在强制重启 MosDNS...\n", time.Now().Format("2006-01-02 15:04:05"))
 				if mosdnsCmd != nil && mosdnsCmd.Process != nil {
+					// 重启前，紧急保存统计数据
+					config.SaveCurrentStatsToHistory()
 					mosdnsCmd.Process.Kill() // 直接杀死，循环会自动拉起
 				}
 			case <-ctx.Done():
 				if mosdnsCmd != nil && mosdnsCmd.Process != nil {
+					config.SaveCurrentStatsToHistory()
 					mosdnsCmd.Process.Signal(syscall.SIGTERM)
 				}
 				return

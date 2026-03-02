@@ -34,19 +34,20 @@ func UpdateGeoRules() {
 		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt":   "/etc/mosdns/rules/geosite_no_cn.txt",
 	}
 
-	anySuccess := false
+	anyUpdated := false
 	for url, path := range files {
-		if err := service.DownloadFile(url, path); err != nil {
+		updated, err := service.DownloadFile(url, path)
+		if err != nil {
 			fmt.Printf("⚠️  下载失败 %s: %v (将跳过该文件)\n", path, err)
-		} else {
-			anySuccess = true
+		} else if updated {
+			anyUpdated = true
 		}
 	}
 
-	if anySuccess {
-		fmt.Println("🔄 规则已更新，正在通过 killall 重启内核...")
-		service.RestartService()
+	if anyUpdated {
+		fmt.Println("🎉 规则文件已更新。")
+		fmt.Println("💡 提示: 系统检测到规则变动，将在几秒内自动重启内核以应用更改。")
 	} else {
-		fmt.Println("❌ 更新全部失败，保持当前版本继续运行。")
+		fmt.Println("✅ 规则已是最新，无需更新。")
 	}
 }

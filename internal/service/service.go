@@ -1,11 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -59,33 +61,49 @@ func ReloadService() error {
 	return nil
 }
 
-// DownloadFile downloads a file from URL to dest
-func DownloadFile(url, dest string) error {
-	client := http.Client{Timeout: 30 * time.Second}
+// DownloadFile downloads a file from URL to dest, only if content is different.
+// Returns (true, nil) if file was updated, (false, nil) if content is same.
+func DownloadFile(url, dest string) (bool, error) {
+	client := http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return false, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	out, err := os.Create(dest)
+	// 1. 读取新内容到内存
+	newContent, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	written, err := io.Copy(out, resp.Body)
-	if err != nil {
-		return err
+		return false, err
 	}
 
-	if written < 10 {
-		return fmt.Errorf("下载的文件太小，可能是错误的响应")
+	if len(newContent) < 100 {
+		return false, fmt.Errorf("下载内容太小，可能是错误的响应")
 	}
 
-	return nil
+	// 2. 读取旧内容进行对比
+	oldContent, err := os.ReadFile(dest)
+	if err == nil && bytes.Equal(oldContent, newContent) {
+		// 内容一致，跳过写入，避免触发 fsnotify 重启
+		return false, nil
+	}
+
+	// 3. 内容不一致，原子写入
+	tmpDest := dest + ".tmp"
+	if err := os.WriteFile(tmpDest, newContent, 0644); err != nil {
+		return false, err
+	}
+
+	// 原子替换
+	if err := os.Rename(tmpDest, dest); err != nil {
+		os.Remove(tmpDest)
+		return false, err
+	}
+
+	fmt.Printf("✅ 文件已更新: %s\n", filepath.Base(dest))
+	return true, nil
 }
