@@ -143,19 +143,37 @@ func ClearHistory() {
 	os.Remove(StatsHistoryPath)
 }
 
+var (
+	// 统计指标正则：匹配 value 部分，支持科学计数法
+	reMetricValue = regexp.MustCompile(`\s+([0-9.]+(?:[eE][+-]?[0-9]+)?)`)
+	
+	// 配置标记正则：忽略大小写的 # TAG_LOCAL 和 # TAG_REMOTE
+	reTagLocal  = regexp.MustCompile(`(?i)#\s*TAG_LOCAL`)
+	reTagRemote = regexp.MustCompile(`(?i)#\s*TAG_REMOTE`)
+)
+
 func findMetric(metrics, name string) string {
-	// 匹配带标签的情况: name{...} value
-	// 增加对科学计数法的支持: [0-9.]+(?:[eE][+-]?[0-9]+)?
-	re := regexp.MustCompile(name + `\{.*?\}\s+([0-9.]+(?:[eE][+-]?[0-9]+)?)`)
-	match := re.FindStringSubmatch(metrics)
-	if len(match) > 1 {
-		return match[1]
+	// 1. 构造带标签的搜索模式: name{
+	tagPattern := name + "{"
+	if idx := strings.Index(metrics, tagPattern); idx != -1 {
+		// 找到后，截取一段足够的文本进行正则匹配
+		sub := metrics[idx+len(tagPattern):]
+		// 找到第一个 } 之后的部分
+		if endIdx := strings.Index(sub, "}"); endIdx != -1 {
+			match := reMetricValue.FindStringSubmatch(sub[endIdx+1:])
+			if len(match) > 1 {
+				return match[1]
+			}
+		}
 	}
-	// 匹配不带标签的情况: name value
-	re = regexp.MustCompile(name + `\s+([0-9.]+(?:[eE][+-]?[0-9]+)?)`)
-	match = re.FindStringSubmatch(metrics)
-	if len(match) > 1 {
-		return match[1]
+	
+	// 2. 匹配不带标签的情况: name value
+	if idx := strings.Index(metrics, name); idx != -1 {
+		sub := metrics[idx+len(name):]
+		match := reMetricValue.FindStringSubmatch(sub)
+		if len(match) > 1 {
+			return match[1]
+		}
 	}
 	return "0"
 }
@@ -353,7 +371,14 @@ func SetUpstream(isLocal bool, addr string) error {
 }
 
 func findAddrNodeByComment(node *yaml.Node, tag string) *yaml.Node {
-	re := regexp.MustCompile(`(?i)#\s*` + tag)
+	var re *regexp.Regexp
+	if strings.EqualFold(tag, "TAG_LOCAL") {
+		re = reTagLocal
+	} else if strings.EqualFold(tag, "TAG_REMOTE") {
+		re = reTagRemote
+	} else {
+		re = regexp.MustCompile(`(?i)#\s*` + tag)
+	}
 
 	if node.Kind == yaml.DocumentNode {
 		for _, content := range node.Content {
@@ -520,26 +545,3 @@ func RestartViaKill() error {
 	return service.RestartService()
 }
 
-func ClearLogs() error {
-	logFile := "/var/log/mosdns.log"
-	return os.Truncate(logFile, 0)
-}
-
-func GetLogSize() string {
-	logFile := "/var/log/mosdns.log"
-	info, err := os.Stat(logFile)
-	if err != nil {
-		return "0 B"
-	}
-	size := info.Size()
-	const unit = 1024
-	if size < unit {
-		return fmt.Sprintf("%d B", size)
-	}
-	div, exp := int64(unit), 0
-	for n := size / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
-}

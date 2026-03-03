@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,7 +32,7 @@ func init() {
 
 func runDockerPanel() {
 	fmt.Println("=====================================")
-	fmt.Println("             MosCtl Docker (v0.4.3)  ")
+	fmt.Println("             MosCtl Docker (v0.5.0)  ")
 	fmt.Println("=====================================")
 
 	os.Setenv("MOSCTL_MODE", "docker")
@@ -59,10 +60,10 @@ func runDockerPanel() {
 	// 4. 事件驱动文件监控 (fsnotify)
 	go fileWatcher(ctx)
 
-	// 5. 定时任务 (Cron)
+	// 5. 定时任务 (Cron - GeoRules Update)
 	go cronScheduler(ctx)
 
-	// 6. 统计任务 (每 6 小时打印缓存命中率)
+	// 6. 统计任务 (渐进式播报)
 	go statsScheduler(ctx)
 
 	// 7. 诊断
@@ -81,22 +82,29 @@ func runDockerPanel() {
 	fmt.Printf("\n[%s] 📥 接收到信号 %v，准备优雅退出...\n", time.Now().Format("2006-01-02 15:04:05"), sig)
 	cancel()
 	
-	// 给一点清理时间
 	time.Sleep(1 * time.Second)
 	fmt.Println("👋 MosCtl 已安全关闭。")
 }
 
-// statsScheduler 定时打印缓存统计
+// statsScheduler 实现渐进式播报策略
 func statsScheduler(ctx context.Context) {
-	// 启动 1 分钟后先打印一次，确认功能正常
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(1 * time.Minute):
-		printStats()
+	initialSequence := []time.Duration{
+		1 * time.Minute,
+		5 * time.Minute,
+		15 * time.Minute,
+		1 * time.Hour,
 	}
 
-	ticker := time.NewTicker(6 * time.Hour)
+	for _, delay := range initialSequence {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+			printStats()
+		}
+	}
+
+	ticker := time.NewTicker(4 * time.Hour)
 	defer ticker.Stop()
 
 	for {
@@ -112,7 +120,6 @@ func statsScheduler(ctx context.Context) {
 func printStats() {
 	stats, err := config.GetCacheStats()
 	if err != nil {
-		// 如果是因为服务器还没起来，不打印错误，静默等待下一次
 		return
 	}
 	fmt.Printf("[%s] 📊 缓存报告: %s\n", time.Now().Format("2006-01-02 15:04:05"), stats)
@@ -143,22 +150,23 @@ func processManager(ctx context.Context) {
 				continue
 			}
 
-			// 监听退出或重启信号
 			done := make(chan error, 1)
 			go func() { done <- mosdnsCmd.Wait() }()
 
 			select {
 			case err := <-done:
-				fmt.Printf("[%s] ⚠️  MosDNS 进程已退出 (err: %v)\n", time.Now().Format("2006-01-02 15:04:05"), err)
-				// 异常退出也保存一下当前数据
+				if ctx.Err() != nil {
+					return 
+				}
+				fmt.Printf("[%s] ⚠️  MosDNS 进程已退出 (err: %v)，准备重启...\n", time.Now().Format("2006-01-02 15:04:05"), err)
 				config.SaveCurrentStatsToHistory()
 				time.Sleep(1 * time.Second)
 			case <-service.DockerRestartChan:
-				fmt.Printf("[%s] 🔄 收到重启信号，正在强制重启 MosDNS...\n", time.Now().Format("2006-01-02 15:04:05"))
+				fmt.Printf("[%s] 🔄 收到重启信号，正在准备热重载...\n", time.Now().Format("2006-01-02 15:04:05"))
+				printStats()
 				if mosdnsCmd != nil && mosdnsCmd.Process != nil {
-					// 重启前，紧急保存统计数据
 					config.SaveCurrentStatsToHistory()
-					mosdnsCmd.Process.Kill() // 直接杀死，循环会自动拉起
+					mosdnsCmd.Process.Kill()
 				}
 			case <-ctx.Done():
 				if mosdnsCmd != nil && mosdnsCmd.Process != nil {
@@ -171,7 +179,7 @@ func processManager(ctx context.Context) {
 	}
 }
 
-// fileWatcher 事件驱动的文件监控
+// fileWatcher 监控目录变动
 func fileWatcher(ctx context.Context) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -180,11 +188,13 @@ func fileWatcher(ctx context.Context) {
 	}
 	defer watcher.Close()
 
-	// 监控目录和关键文件
-	watcher.Add("/etc/mosdns/rules")
-	watcher.Add("/etc/mosdns/config.yaml")
+	watchDirs := []string{"/etc/mosdns", "/etc/mosdns/rules"}
+	for _, dir := range watchDirs {
+		if err := watcher.Add(dir); err != nil {
+			fmt.Printf("⚠️ 无法监控目录 %s: %v\n", dir, err)
+		}
+	}
 
-	// 抖动消除 timer，防止短时间内大量写入触发多次重启
 	var timer *time.Timer
 
 	for {
@@ -195,8 +205,12 @@ func fileWatcher(ctx context.Context) {
 			if !ok {
 				return
 			}
-			// 我们只关心 Write 和 Create
-			if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
+			
+			filename := filepath.Base(event.Name)
+			isConfig := filename == "config.yaml"
+			isRule := strings.HasSuffix(event.Name, ".txt") || strings.Contains(event.Name, "/rules/")
+
+			if (isConfig || isRule) && (event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0) {
 				if timer != nil {
 					timer.Stop()
 				}
@@ -214,18 +228,17 @@ func fileWatcher(ctx context.Context) {
 	}
 }
 
-// cronScheduler 每日定时任务
+// cronScheduler 每日定时更新 GeoRules
 func cronScheduler(ctx context.Context) {
 	for {
 		now := time.Now()
-		// 每天凌晨 2:30
 		next := time.Date(now.Year(), now.Month(), now.Day(), 2, 30, 0, 0, now.Location())
 		if next.Before(now) {
 			next = next.Add(24 * time.Hour)
 		}
 		
 		timer := time.NewTimer(next.Sub(now))
-		fmt.Printf("[%s] ⏰ 下次计划任务在: %s\n", time.Now().Format("2006-01-02 15:04:05"), next.Format("2006-01-02 15:04:05"))
+		fmt.Printf("[%s] ⏰ 下次计划更新任务在: %s\n", time.Now().Format("2006-01-02 15:04:05"), next.Format("2006-01-02 15:04:05"))
 
 		select {
 		case <-ctx.Done():
@@ -234,6 +247,37 @@ func cronScheduler(ctx context.Context) {
 		case <-timer.C:
 			UpdateGeoRules()
 		}
+	}
+}
+
+// UpdateGeoRules 更新 GeoIP 和 GeoSite 规则
+func UpdateGeoRules() {
+	fmt.Println("⬇️  正在执行计划内 GeoSite/GeoIP 更新...")
+
+	os.MkdirAll("/etc/mosdns/rules", 0755)
+
+	ghProxy := "https://gh-proxy.com/"
+	files := map[string]string{
+		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt": "/etc/mosdns/rules/geosite_cn.txt",
+		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt":              "/etc/mosdns/rules/geoip_cn.txt",
+		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt":    "/etc/mosdns/rules/geosite_apple.txt",
+		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt":   "/etc/mosdns/rules/geosite_no_cn.txt",
+	}
+
+	anyUpdated := false
+	for url, path := range files {
+		updated, err := service.DownloadFile(url, path)
+		if err != nil {
+			fmt.Printf("⚠️  下载失败 %s: %v (将跳过该文件)\n", path, err)
+		} else if updated {
+			anyUpdated = true
+		}
+	}
+
+	if anyUpdated {
+		fmt.Println("🎉 规则文件已更新，fsnotify 将自动触发重启。")
+	} else {
+		fmt.Println("✅ 规则已是最新，无需更新。")
 	}
 }
 
@@ -251,9 +295,7 @@ func initializeDockerEnv() {
 			copyFile(f, filepath.Join("/etc/mosdns/rules", filepath.Base(f)))
 		}
 	} else {
-		// 确保旧版本配置中开启了统计功能
 		config.EnsureMetricsServer()
-		// 确保缓存 TTL 为 86400
 		config.EnsureDefaultTTL()
 	}
 

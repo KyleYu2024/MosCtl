@@ -1,6 +1,6 @@
 log:
   level: warn
-  file: "/var/log/mosdns.log"
+  file: ""
 
 api:
   http: "127.0.0.1:8080"
