@@ -14,8 +14,7 @@ services:
       - "53:53/udp"
       - "53:53/tcp"
     environment:
-      LOCAL_UPSTREAM: "udp://223.5.5.5" #国内上游dns
-      REMOTE_UPSTREAM: "udp://10.10.1.202:53" #国外上游dns
+      REMOTE_UPSTREAM: "udp://10.10.1.202:53" #国外上游dns（代理软件的dns监听地址）
       TZ: "Asia/Shanghai"
     volumes:
       - ./data:/etc/mosdns
