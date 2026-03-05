@@ -1,0 +1,10 @@
+[Unit]
+Description=MosDNS Rescue Mode (Iptables Forwarding)
+After=network.target
+
+[Service]
+Type=oneshot
+# 开启内核转发 + 设置 iptables 劫持 53 端口到 223.5.5.5
+ExecStart=/usr/local/bin/mosctl rescue enable
+# 打印日志提醒
+ExecStartPost=/bin/echo "⚠️ MosDNS died! Rescue mode enabled (Forwarding to 223.5.5.5)"
