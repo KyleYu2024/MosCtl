@@ -56,7 +56,6 @@ services:
       - "53:53/udp"
       - "53:53/tcp"
     environment:
-      LOCAL_UPSTREAM: "udp://223.5.5.5" #国内上游dns
       REMOTE_UPSTREAM: "udp://10.10.1.202:53" #国外上游dns
       TZ: "Asia/Shanghai"
     volumes:
