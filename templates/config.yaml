@@ -25,6 +25,7 @@ plugins:
         - addr: "https://dns.alidns.com/dns-query"
         - addr: "https://doh.pub/dns-query"
         - addr: "udp://223.5.5.5" # TAG_LOCAL
+        - addr: "udp://223.6.6.6"
         - addr: "udp://119.29.29.29"
 
   - tag: forward_remote
@@ -181,9 +182,9 @@ plugins:
       - matches: client_ip $user_iot_ip
         exec: accept
 
-      - exec: $query_is_apple_domain
-      - exec: jump has_resp_sequence
       - exec: $query_is_reject_domain
+      - exec: jump has_resp_sequence
+      - exec: $query_is_apple_domain
       - exec: jump has_resp_sequence
       - exec: $query_is_local_domain
       - exec: jump has_resp_sequence
