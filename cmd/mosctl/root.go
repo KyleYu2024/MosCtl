@@ -31,7 +31,7 @@ func showMenu() {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Println("\033[0;32m=====================================\033[0m")
-		fmt.Println("\033[0;32m         MosDNS 管理面板 [0.4.8]      \033[0m")
+		fmt.Println("\033[0;32m         MosDNS 管理面板 [0.5.2]      \033[0m")
 		fmt.Println("\033[0;32m=====================================\033[0m")
 
 		
