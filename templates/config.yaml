@@ -20,10 +20,8 @@ plugins:
   - tag: forward_local
     type: forward
     args:
-      concurrent: 4
+      concurrent: 3
       upstreams:
-        - addr: "https://dns.alidns.com/dns-query"
-        - addr: "https://doh.pub/dns-query"
         - addr: "udp://223.5.5.5" # TAG_LOCAL
         - addr: "udp://223.6.6.6"
         - addr: "udp://119.29.29.29"
