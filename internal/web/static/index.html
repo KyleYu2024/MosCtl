@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d10">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MosCtl">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/assets/icon-192.png?v=3" sizes="192x192">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=3">
+  <title>MosCtl 规则管理</title>
+  <style>
+    :root{--bg:#0b0d10;--surface:#11151a;--surface-2:#171b21;--line:#292e35;--text:#f3f1ed;--muted:#989da6;--gold:#dfa96f;--gold-strong:#efb978;--danger:#e07a78;--success:#91bd72;--shadow:0 24px 80px rgba(0,0,0,.35)}
+    *{box-sizing:border-box}html{background:var(--bg)}body{margin:0;height:100vh;height:100dvh;overflow:hidden;overscroll-behavior:none;background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}button,input,textarea{font:inherit}button{cursor:pointer}
+    .hidden{display:none!important}.shell{display:flex;flex-direction:column;width:min(1180px,calc(100% - 40px));height:100vh;height:100dvh;margin:0 auto;padding:max(28px,env(safe-area-inset-top)) max(0px,env(safe-area-inset-right)) max(32px,env(safe-area-inset-bottom)) max(0px,env(safe-area-inset-left))}.topbar{display:flex;flex:0 0 auto;align-items:center;justify-content:space-between;padding-bottom:22px;margin-bottom:26px;border-bottom:1px solid #22272d}.brand{font-size:30px;font-weight:780;letter-spacing:-1px}.brand span{color:var(--gold)}.subtitle{display:flex;align-items:center;gap:8px;margin-top:4px;color:var(--muted);font-size:13px}.version{display:inline-flex;align-items:center;height:19px;padding:0 7px;border-radius:6px;background:#171b20;color:#8e949c;font:600 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.2px}.top-actions{display:flex;align-items:center;gap:10px}.status{display:flex;align-items:center;gap:9px;margin-right:8px;color:#c8cbc6;font-size:13px}.dot{width:8px;height:8px;border-radius:50%;background:var(--success);box-shadow:0 0 0 5px rgba(145,189,114,.09),0 0 16px rgba(145,189,114,.55)}.status.offline{color:var(--muted)}.status.offline .dot{background:#777e87;box-shadow:none}.logout-button{display:grid;place-items:center;width:40px;height:40px;border:0;border-radius:10px;background:transparent;cursor:pointer;transition:.18s ease}.logout-button:hover{background:rgba(224,122,120,.1)}.logout-button:focus-visible{outline:2px solid var(--danger);outline-offset:2px}.logout-button img{width:21px;height:21px;display:block}
+    .button{border:0;border-radius:10px;background:#171b20;color:var(--text);height:42px;padding:0 17px;transition:.18s ease}.button:hover{background:#1d2228}.button:focus-visible,.rule-card:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--gold);outline-offset:2px}.button.primary{background:var(--gold);color:#17120d;font-weight:700}.button.primary:hover{background:var(--gold-strong)}.button.ghost{background:#12161a}.button.danger{color:#f0aaaa}.button:disabled{cursor:not-allowed;opacity:.42}.unsaved{color:var(--gold);font-size:12px;min-height:18px}
+    .workspace{display:grid;flex:1;min-height:0;grid-template-columns:270px minmax(0,1fr);gap:48px}.sidebar{min-height:0;overflow:auto;padding:4px 0;background:transparent}.sidebar-label{padding:0 12px 12px;color:#777e87;font-size:10px;font-weight:700;letter-spacing:1.7px}.rule-list{display:grid;gap:7px}.rule-card{width:100%;text-align:left;border:0;border-radius:12px;background:transparent;color:inherit;padding:15px;transition:.18s ease}.rule-card:hover{background:#14181c}.rule-card.active{background:#1b1916}.rule-title-row{display:flex;justify-content:space-between;align-items:center;gap:10px}.rule-name{font-weight:650}.rule-count{color:var(--gold);font-size:12px}.rule-description{color:var(--muted);font-size:12px;line-height:1.55;margin-top:6px}.rule-file{color:#60666f;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:9px}
+    .rule-description,.rule-file{display:block}
+    .editor{display:flex;min-width:0;min-height:0;flex-direction:column;padding:4px 0}.search-wrap{position:relative;display:flex;flex:0 0 auto;align-items:center;margin-bottom:10px}.search-wrap input{width:100%;height:34px;border:0;border-radius:9px;background:var(--surface);color:var(--text);padding:0 90px 0 11px}.hint{position:absolute;right:12px;color:#6e747d;font-size:11px;pointer-events:none}.editor textarea{width:100%;flex:1;min-height:0;resize:none;overflow:auto;border:0;border-radius:13px;background:#0f1317;color:#dadddf;padding:20px;font:13px/1.72 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:2}.editor-footer{display:flex;flex:0 0 auto;align-items:center;justify-content:space-between;gap:18px;padding-top:12px}.editor-state{display:flex;align-items:center;gap:12px}.feedback{min-height:18px;color:var(--muted);font-size:12px}.feedback.success{color:var(--success)}.feedback.error{color:var(--danger)}
+    .login-stage{min-height:100vh;display:grid;place-items:center;padding:24px}.login-card{width:min(430px,100%);border:1px solid var(--line);border-radius:20px;background:rgba(17,21,26,.94);box-shadow:var(--shadow);padding:40px 34px 34px}.login-brand{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}.login-mark{color:var(--gold);font-size:30px;font-weight:800;letter-spacing:3px}.field{display:grid;gap:8px;margin:15px 0}.field label{font-size:12px;color:#b7bbc1}.field input{height:46px;border:1px solid var(--line);border-radius:10px;background:#0b0e12;color:var(--text);padding:0 14px}.login-card .button{width:100%;margin-top:12px;height:46px}.login-error{min-height:20px;color:var(--danger);font-size:13px;margin-top:14px}
+    .toast{position:fixed;right:24px;bottom:24px;z-index:20;max-width:360px;border:1px solid #4d463c;border-radius:12px;background:#171a1d;color:var(--text);padding:13px 16px;box-shadow:var(--shadow);font-size:13px;transform:translateY(12px);opacity:0;pointer-events:none;transition:.2s ease}.toast.show{transform:none;opacity:1}.mobile-picker{display:none}
+    @media(max-width:760px){.shell{width:min(100% - 24px,600px);height:100dvh;padding:16px 0}.topbar{padding-bottom:14px;margin-bottom:16px}.brand{font-size:25px}.status{display:none}.subtitle{font-size:11px}.workspace{display:flex;min-height:0}.sidebar{display:none}.mobile-picker{display:block;flex:0 0 auto;width:100%;height:40px;margin-bottom:12px;border:0;border-radius:10px;background:var(--surface);color:var(--text);padding:0 12px}.editor{width:100%;height:100%;padding:0}.unsaved,.feedback{display:none}.search-wrap{margin-bottom:8px}.search-wrap input{width:100%}.editor textarea{min-height:0}.editor-footer{padding-top:10px}.editor-footer .button{width:100%}.top-actions .button{padding:0 13px}}
+  </style>
+</head>
+<body>
+  <main id="login" class="login-stage hidden">
+    <form id="loginForm" class="login-card">
+      <div class="login-brand"><div class="login-mark">MOSCTL</div><span class="version">v{{VERSION}}</span></div>
+      <div class="field"><label for="username">用户名</label><input id="username" name="username" autocomplete="username" required></div>
+      <div class="field"><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+      <button class="button primary" type="submit">登录</button>
+      <div id="loginError" class="login-error" role="alert"></div>
+    </form>
+  </main>
+
+  <main id="app" class="shell hidden">
+    <header class="topbar">
+      <div><div class="brand">MOS<span>CTL</span></div><div class="subtitle"><span>MosDNS Rule Control</span><span class="version">v{{VERSION}}</span></div></div>
+      <div class="top-actions"><div id="connectionStatus" class="status"><span class="dot"></span><span id="connectionText">服务在线</span></div><button id="logout" class="logout-button" aria-label="退出登录" title="退出登录"><img src="/assets/logout.svg" alt=""></button></div>
+    </header>
+    <section class="workspace">
+      <aside class="sidebar"><div class="sidebar-label">规则集</div><nav id="ruleList" class="rule-list" aria-label="规则集"></nav></aside>
+      <section class="editor">
+        <select id="mobilePicker" class="mobile-picker" aria-label="选择规则集"></select>
+        <div class="search-wrap"><input id="search" type="search" placeholder="搜索当前规则" aria-label="搜索当前规则"><span id="matchHint" class="hint"></span></div>
+        <textarea id="content" spellcheck="false" aria-label="规则内容"></textarea>
+        <div class="editor-footer"><div class="editor-state"><div id="dirtyState" class="unsaved"></div><div id="feedback" class="feedback" role="status"></div></div><button id="apply" class="button primary">保存并应用</button></div>
+      </section>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script>
+    const $=s=>document.querySelector(s);const state={rules:[],current:null,original:'',loading:false};
+    async function api(path,options={}){const res=await fetch(path,{headers:{'Content-Type':'application/json',...(options.headers||{})},...options});let data={};try{data=await res.json()}catch{}if(res.status===401){showLogin();throw new Error(data.error||'请重新登录')}if(!res.ok)throw new Error(data.error||'请求失败');return data}
+    function showLogin(){$('#app').classList.add('hidden');$('#login').classList.remove('hidden');setTimeout(()=>$('#username').focus(),30)}
+    function showApp(){$('#login').classList.add('hidden');$('#app').classList.remove('hidden')}
+    function updateConnection(){const online=navigator.onLine;$('#connectionStatus').classList.toggle('offline',!online);$('#connectionText').textContent=online?'服务在线':'网络离线'}
+    function esc(v){const d=document.createElement('div');d.textContent=v;return d.innerHTML}
+    function renderRules(){const html=state.rules.map(r=>`<button class="rule-card ${state.current?.id===r.id?'active':''}" data-id="${r.id}"><span class="rule-title-row"><span class="rule-name">${esc(r.name)}</span><span class="rule-count">${r.entries} 条</span></span><span class="rule-description">${esc(r.description)}</span><span class="rule-file">${esc(r.filename)}</span></button>`).join('');$('#ruleList').innerHTML=html;$('#mobilePicker').innerHTML=state.rules.map(r=>`<option value="${r.id}" ${state.current?.id===r.id?'selected':''}>${esc(r.name)} · ${r.entries} 条</option>`).join('');document.querySelectorAll('.rule-card').forEach(b=>b.onclick=()=>selectRule(b.dataset.id))}
+    function entries(v){return v.split('\n').filter(x=>{x=x.trim();return x&&!x.startsWith('#')}).length}
+    function normalize(v){const lines=v.replaceAll('\r\n','\n').replaceAll('\r','\n').split('\n').map(x=>x.trim());const result=lines.join('\n').trim();return result?result+'\n':''}
+    function updateDirty(){const dirty=$('#content').value!==state.original;$('#dirtyState').textContent=dirty?'有未保存的更改':'';$('#apply').disabled=!dirty||state.loading}
+    async function loadRules(){const data=await api('/api/rules');state.rules=data.rules;renderRules();if(!state.current&&state.rules.length)await selectRule(state.rules[0].id)}
+    async function selectRule(id){if(state.current?.id===id)return;if($('#content').value!==state.original&&!confirm('当前更改尚未保存，确定切换规则集吗？')){$('#mobilePicker').value=state.current.id;return}setLoading(true);try{const data=await api('/api/rules/'+id);state.current=data.rule;state.original=data.content;$('#content').value=data.content;$('#search').value='';$('#matchHint').textContent='';renderRules();updateDirty()}catch(e){feedback(e.message,'error')}finally{setLoading(false)}}
+    function setLoading(v){state.loading=v;$('#content').disabled=v;updateDirty()}
+    function feedback(msg,type=''){const el=$('#feedback');el.textContent=msg;el.className='feedback '+type}
+    function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600)}
+    async function save(apply){if(!state.current)return;setLoading(true);feedback(apply?'正在保存并应用…':'正在保存…');try{const data=await api('/api/rules/'+state.current.id,{method:'PUT',body:JSON.stringify({content:$('#content').value,apply})});state.original=normalize($('#content').value);$('#content').value=state.original;const r=state.rules.find(x=>x.id===state.current.id);if(r)r.entries=data.entries;renderRules();feedback(data.message,'success');toast(data.message);updateDirty()}catch(e){feedback(e.message,'error')}finally{setLoading(false)}}
+    $('#loginForm').onsubmit=async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;$('#loginError').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({username:$('#username').value,password:$('#password').value})});$('#password').value='';showApp();await loadRules()}catch(err){$('#loginError').textContent=err.message}finally{button.disabled=false}};
+    $('#logout').onclick=async()=>{try{await api('/api/logout',{method:'POST',body:'{}'})}catch{}state.current=null;state.original='';showLogin()};
+    $('#content').addEventListener('input',updateDirty);$('#apply').onclick=()=>save(true);$('#mobilePicker').onchange=e=>selectRule(e.target.value);$('#search').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();if(!q){$('#matchHint').textContent='';return}const n=$('#content').value.split('\n').filter(x=>x.toLowerCase().includes(q)).length;$('#matchHint').textContent=`${n} 个匹配`;if(n){const area=$('#content'),i=area.value.toLowerCase().indexOf(q);area.focus();area.setSelectionRange(i,i+q.length)}});window.addEventListener('beforeunload',e=>{if($('#content').value!==state.original){e.preventDefault();e.returnValue=''}});
+    window.addEventListener('online',updateConnection);window.addEventListener('offline',updateConnection);updateConnection();
+    if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+    (async()=>{try{await api('/api/session');showApp();await loadRules()}catch{showLogin()}})();
+  </script>
+</body>
+</html>

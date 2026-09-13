@@ -18,8 +18,9 @@ COPY rules/ /usr/share/mosdns/rules/
 
 RUN chmod +x /usr/local/bin/mosctl /usr/local/bin/mosdns
 
-# 暴露 DNS 端口
+# 暴露 DNS 与 Web 管理端口
 EXPOSE 53/udp 53/tcp
+EXPOSE 9090/tcp
 
 # 强制注入 Docker 模式标识
 ENV MOSCTL_MODE=docker

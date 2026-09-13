@@ -9,17 +9,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	SystemCtl = "systemctl"
-	EnvMode   = "MOSCTL_MODE"
+	SystemCtl  = "systemctl"
+	EnvMode    = "MOSCTL_MODE"
 	ModeDocker = "docker"
 )
 
 // DockerRestartChan 用于 Docker 模式下的重启信号
 var DockerRestartChan = make(chan struct{}, 1)
+
+var (
+	dockerRestartMu   sync.Mutex
+	lastDockerRestart time.Time
+)
 
 // IsDockerMode 返回当前是否处于 Docker 模式
 func IsDockerMode() bool {
@@ -32,6 +38,13 @@ func IsDockerMode() bool {
 func RestartService() error {
 	// 无论如何，优先检查环境变量
 	if IsDockerMode() {
+		dockerRestartMu.Lock()
+		if time.Since(lastDockerRestart) < 1500*time.Millisecond {
+			dockerRestartMu.Unlock()
+			return nil
+		}
+		lastDockerRestart = time.Now()
+		dockerRestartMu.Unlock()
 		select {
 		case DockerRestartChan <- struct{}{}:
 			fmt.Println("🔄 Docker 模式: 已发送重启信号")
@@ -44,7 +57,7 @@ func RestartService() error {
 	if _, err := exec.LookPath(SystemCtl); err == nil {
 		return exec.Command(SystemCtl, "restart", "mosdns").Run()
 	}
-	
+
 	fmt.Printf("⚠️  未找到 systemctl 且非 Docker 模式 (MODE=%q), 跳过服务重启\n", os.Getenv(EnvMode))
 	return nil
 }

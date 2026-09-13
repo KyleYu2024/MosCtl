@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "MosCtl 规则管理",
+  "short_name": "MosCtl",
+  "description": "管理 MosDNS 本地分流规则并立即应用。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0b0d10",
+  "theme_color": "#0b0d10",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    {"src": "/assets/icon-192.png?v=3", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/assets/icon-512.png?v=3", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/assets/icon-maskable-512.png?v=3", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

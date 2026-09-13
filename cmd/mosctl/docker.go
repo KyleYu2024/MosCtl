@@ -13,6 +13,8 @@ import (
 
 	"github.com/KyleYu2024/mosctl/internal/config"
 	"github.com/KyleYu2024/mosctl/internal/service"
+	"github.com/KyleYu2024/mosctl/internal/version"
+	webui "github.com/KyleYu2024/mosctl/internal/web"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +34,7 @@ func init() {
 
 func runDockerPanel() {
 	fmt.Println("=====================================")
-	fmt.Println("             MosCtl Docker (v0.5.3)  ")
+	fmt.Printf("             MosCtl Docker (v%s)  \n", version.Current)
 	fmt.Println("=====================================")
 
 	os.Setenv("MOSCTL_MODE", "docker")
@@ -63,10 +65,13 @@ func runDockerPanel() {
 	// 5. 定时任务 (Cron - GeoRules Update)
 	go cronScheduler(ctx)
 
-	// 6. 统计任务 (渐进式播报)
+	// 6. Web 规则管理页（未配置登录凭据时不启动）
+	go webui.Run(ctx)
+
+	// 7. 统计任务 (渐进式播报)
 	go statsScheduler(ctx)
 
-	// 7. 诊断
+	// 8. 诊断
 	go func() {
 		time.Sleep(3 * time.Second)
 		config.RunTest()
@@ -74,14 +79,14 @@ func runDockerPanel() {
 		fmt.Printf("[%s] 🟢 正在按策略分流 DNS 请求，系统运行状态正常...\n", time.Now().Format("2006-01-02 15:04:05"))
 	}()
 
-	// 8. 信号捕获
+	// 9. 信号捕获
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	
+
 	sig := <-sigChan
 	fmt.Printf("\n[%s] 📥 接收到信号 %v，准备优雅退出...\n", time.Now().Format("2006-01-02 15:04:05"), sig)
 	cancel()
-	
+
 	time.Sleep(1 * time.Second)
 	fmt.Println("👋 MosCtl 已安全关闭。")
 }
@@ -156,7 +161,7 @@ func processManager(ctx context.Context) {
 			select {
 			case err := <-done:
 				if ctx.Err() != nil {
-					return 
+					return
 				}
 				fmt.Printf("[%s] ⚠️  MosDNS 进程已退出 (err: %v)，准备重启...\n", time.Now().Format("2006-01-02 15:04:05"), err)
 				config.SaveCurrentStatsToHistory()
@@ -205,7 +210,7 @@ func fileWatcher(ctx context.Context) {
 			if !ok {
 				return
 			}
-			
+
 			filename := filepath.Base(event.Name)
 			isConfig := filename == "config.yaml"
 			isRule := strings.HasSuffix(event.Name, ".txt") || strings.Contains(event.Name, "/rules/")
@@ -236,7 +241,7 @@ func cronScheduler(ctx context.Context) {
 		if next.Before(now) {
 			next = next.Add(24 * time.Hour)
 		}
-		
+
 		timer := time.NewTimer(next.Sub(now))
 		fmt.Printf("[%s] ⏰ 下次计划更新任务在: %s\n", time.Now().Format("2006-01-02 15:04:05"), next.Format("2006-01-02 15:04:05"))
 
@@ -259,9 +264,9 @@ func UpdateGeoRules() {
 	ghProxy := "https://gh-proxy.com/"
 	files := map[string]string{
 		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt": "/etc/mosdns/rules/geosite_cn.txt",
-		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt":              "/etc/mosdns/rules/geoip_cn.txt",
+		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt":               "/etc/mosdns/rules/geoip_cn.txt",
 		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/apple-cn.txt":    "/etc/mosdns/rules/geosite_apple.txt",
-		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt":   "/etc/mosdns/rules/geosite_no_cn.txt",
+		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt":  "/etc/mosdns/rules/geosite_no_cn.txt",
 	}
 
 	anyUpdated := false
@@ -289,7 +294,7 @@ func initializeDockerEnv() {
 	if _, err := os.Stat("/etc/mosdns/config.yaml"); os.IsNotExist(err) {
 		fmt.Println("📢 初始化配置模板...")
 		copyFile("/usr/share/mosdns/config.yaml", "/etc/mosdns/config.yaml")
-		
+
 		files, _ := filepath.Glob("/usr/share/mosdns/rules/*.txt")
 		for _, f := range files {
 			copyFile(f, filepath.Join("/etc/mosdns/rules", filepath.Base(f)))
