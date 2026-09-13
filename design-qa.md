@@ -52,6 +52,7 @@ The duplicate active-rule heading has been removed. Save-and-apply now sits in a
 - Pass 7: added complete installable PWA metadata, platform icons, safe-area behavior, network status, and an API-safe offline shell.
 - Pass 8: replaced the temporary M icon with the approved deeper-blue circular rising-arrow logo, using transparent rounded corners for standard icons and an opaque full-bleed source for maskable and Apple icons. The service-worker cache version was advanced so installed clients refresh the artwork.
 - Pass 9: added a single-source `v0.5.3` version badge to the login card and authenticated header; both rendered states were checked with no wrapping or console errors.
+- Pass 10: removed the `MosDNS Rule Control` subtitle, changed iOS standalone status-bar mode from overlaying `black-translucent` to `black`, and restored safe-area padding inside the mobile media rule so device status content cannot overlap the header.
 - Final browser pass found no remaining P0/P1/P2 issues.
 
 **Implementation Checklist**

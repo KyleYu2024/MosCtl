@@ -117,6 +117,12 @@ func TestAppShowsVersion(t *testing.T) {
 	if !strings.Contains(body, "v0.5.3") || strings.Contains(body, "{{VERSION}}") {
 		t.Fatalf("rendered page does not contain the resolved version")
 	}
+	if strings.Contains(body, "MosDNS Rule Control") {
+		t.Fatalf("removed subtitle is still present")
+	}
+	if !strings.Contains(body, `apple-mobile-web-app-status-bar-style" content="black"`) || !strings.Contains(body, "safe-area-inset-top") {
+		t.Fatalf("mobile safe-area metadata or CSS is missing")
+	}
 }
 
 func TestRejectsUnknownRuleAndCrossOriginWrite(t *testing.T) {
