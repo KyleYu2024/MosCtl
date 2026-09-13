@@ -1,4 +1,4 @@
-const CACHE_NAME = "mosctl-shell-v4";
+const CACHE_NAME = "mosctl-shell-v5";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",

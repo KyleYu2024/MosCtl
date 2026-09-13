@@ -114,7 +114,7 @@ func TestAppShowsVersion(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "v0.5.3") || strings.Contains(body, "{{VERSION}}") {
+	if !strings.Contains(body, "v0.5.4") || strings.Contains(body, "{{VERSION}}") {
 		t.Fatalf("rendered page does not contain the resolved version")
 	}
 	if strings.Contains(body, "MosDNS Rule Control") {
