@@ -2,7 +2,9 @@ package web
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/hex"
@@ -15,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,9 +28,10 @@ import (
 )
 
 const (
-	defaultListen = ":9090"
-	maxRuleSize   = 2 << 20
-	sessionTTL    = 12 * time.Hour
+	defaultListen  = ":9090"
+	maxRuleSize    = 2 << 20
+	sessionTTL     = 30 * 24 * time.Hour
+	sessionKeyFile = ".web_session_key"
 )
 
 //go:embed static/*
@@ -54,14 +58,14 @@ type Options struct {
 }
 
 type Server struct {
-	ruleDir  string
-	restart  func() error
-	logger   *log.Logger
-	username string
-	password string
+	ruleDir    string
+	restart    func() error
+	logger     *log.Logger
+	username   string
+	password   string
+	sessionKey []byte
 
 	mu       sync.Mutex
-	sessions map[string]time.Time
 	attempts map[string]*loginAttempt
 }
 
@@ -85,10 +89,17 @@ func New(opts Options) (*Server, error) {
 	if opts.Logger == nil {
 		opts.Logger = log.Default()
 	}
+	sessionKey, err := loadOrCreateSessionKey(filepath.Dir(opts.RuleDir))
+	if err != nil {
+		return nil, fmt.Errorf("无法初始化 Web 会话密钥: %w", err)
+	}
+	credentialMAC := hmac.New(sha256.New, sessionKey)
+	credentialMAC.Write([]byte(username + "\x00" + password))
+	sessionKey = credentialMAC.Sum(nil)
 	return &Server{
 		ruleDir: opts.RuleDir, restart: opts.Restart, logger: opts.Logger,
-		username: username, password: password,
-		sessions: make(map[string]time.Time), attempts: make(map[string]*loginAttempt),
+		username: username, password: password, sessionKey: sessionKey,
+		attempts: make(map[string]*loginAttempt),
 	}, nil
 }
 
@@ -205,29 +216,23 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "用户名或密码不正确")
 		return
 	}
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
+	token, err := s.newSessionToken()
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "无法创建会话")
 		return
 	}
-	token := hex.EncodeToString(tokenBytes)
 	s.mu.Lock()
-	s.sessions[token] = time.Now().Add(sessionTTL)
 	delete(s.attempts, ip)
 	s.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name: "mosctl_session", Value: token, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, Secure: requestIsHTTPS(r), MaxAge: int(sessionTTL.Seconds()),
+		Expires: time.Now().Add(sessionTTL),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "username": s.username})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie("mosctl_session"); err == nil {
-		s.mu.Lock()
-		delete(s.sessions, c.Value)
-		s.mu.Unlock()
-	}
 	http.SetCookie(w, &http.Cookie{Name: "mosctl_session", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -404,19 +409,75 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) authenticated(r *http.Request) bool {
 	cookie, err := r.Cookie("mosctl_session")
-	if err != nil || len(cookie.Value) != 64 {
+	if err != nil {
 		return false
 	}
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for token, expires := range s.sessions {
-		if now.After(expires) {
-			delete(s.sessions, token)
-		}
+	parts := strings.Split(cookie.Value, ".")
+	if len(parts) != 3 || len(parts[1]) != 32 {
+		return false
 	}
-	expires, ok := s.sessions[cookie.Value]
-	return ok && now.Before(expires)
+	expires, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || time.Now().Unix() > expires {
+		return false
+	}
+	if _, err := hex.DecodeString(parts[1]); err != nil {
+		return false
+	}
+	signature, err := hex.DecodeString(parts[2])
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, s.sessionKey)
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	return hmac.Equal(signature, mac.Sum(nil))
+}
+
+func (s *Server) newSessionToken() (string, error) {
+	randomBytes := make([]byte, 16)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+	payload := strconv.FormatInt(time.Now().Add(sessionTTL).Unix(), 10) + "." + hex.EncodeToString(randomBytes)
+	mac := hmac.New(sha256.New, s.sessionKey)
+	mac.Write([]byte(payload))
+	return payload + "." + hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+func loadOrCreateSessionKey(configDir string) ([]byte, error) {
+	keyPath := filepath.Join(configDir, sessionKeyFile)
+	if key, err := os.ReadFile(keyPath); err == nil {
+		if len(key) != 32 {
+			return nil, fmt.Errorf("会话密钥长度无效")
+		}
+		return key, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	tmp, err := os.CreateTemp(configDir, ".web-session-key-*")
+	if err != nil {
+		return nil, err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0600); err == nil {
+		_, err = tmp.Write(key)
+	}
+	closeErr := tmp.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmpName, keyPath)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
 }
 
 func (s *Server) allowLogin(ip string) bool {

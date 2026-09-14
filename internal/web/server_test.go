@@ -182,3 +182,66 @@ func TestCredentialsAreRequired(t *testing.T) {
 		t.Fatal("expected missing credentials error")
 	}
 }
+
+func TestSessionSurvivesServerRestart(t *testing.T) {
+	t.Setenv("USERNAME", "admin")
+	t.Setenv("PASSWORD", "admin123")
+	configDir := t.TempDir()
+	ruleDir := filepath.Join(configDir, "rules")
+	if err := os.MkdirAll(ruleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	first, err := New(Options{RuleDir: ruleDir, Restart: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := loginCookie(t, first.Handler())
+	if cookie.MaxAge != int(sessionTTL.Seconds()) {
+		t.Fatalf("cookie MaxAge = %d", cookie.MaxAge)
+	}
+	second, err := New(Options{RuleDir: ruleDir, Restart: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/rules", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	second.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("session after restart status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	info, err := os.Stat(filepath.Join(configDir, sessionKeyFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("session key mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestPasswordChangeInvalidatesExistingSession(t *testing.T) {
+	t.Setenv("USERNAME", "admin")
+	t.Setenv("PASSWORD", "admin123")
+	configDir := t.TempDir()
+	ruleDir := filepath.Join(configDir, "rules")
+	if err := os.MkdirAll(ruleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	first, err := New(Options{RuleDir: ruleDir, Restart: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := loginCookie(t, first.Handler())
+	t.Setenv("PASSWORD", "new-password")
+	second, err := New(Options{RuleDir: ruleDir, Restart: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/rules", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	second.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status after password change = %d, want 401", rec.Code)
+	}
+}
