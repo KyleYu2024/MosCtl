@@ -1,0 +1,196 @@
+name: Sync MosDNS kernel
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+      timezone: "Asia/Shanghai"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even when the amd64 digest has not changed
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-mosdns-kernel
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_IMAGE: irinesistiana/mosdns:latest
+  TARGET_IMAGE: kyleyu2024/mosctl
+  DOCKER_BRANCH: docker
+
+jobs:
+  sync:
+    name: Check, test, and publish amd64 image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out Docker branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.DOCKER_BRANCH }}
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve upstream amd64 digest
+        id: upstream
+        env:
+          FORCE_REBUILD: ${{ inputs.force }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_json="$(docker buildx imagetools inspect "$UPSTREAM_IMAGE" --format '{{json .Manifest}}')"
+          upstream_digest="$(jq -er '.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest' <<<"$manifest_json")"
+          if [[ ! "$upstream_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid upstream digest: $upstream_digest" >&2
+            exit 1
+          fi
+
+          recorded_digest=""
+          if [[ -f .github/mosdns-amd64.digest ]]; then
+            recorded_digest="$(tr -d '[:space:]' < .github/mosdns-amd64.digest)"
+          fi
+
+          changed=false
+          if [[ "$upstream_digest" != "$recorded_digest" || "$FORCE_REBUILD" == "true" ]]; then
+            changed=true
+          fi
+
+          digest_hex="${upstream_digest#sha256:}"
+          {
+            echo "digest=$upstream_digest"
+            echo "short=${digest_hex:0:12}"
+            echo "changed=$changed"
+            echo "docker_sha=$(git rev-parse HEAD)"
+            echo "recorded=$recorded_digest"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### MosDNS kernel check"
+            echo "- Recorded amd64 digest: \`${recorded_digest:-none}\`"
+            echo "- Upstream amd64 digest: \`$upstream_digest\`"
+            echo "- Build required: \`$changed\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Go
+        if: steps.upstream.outputs.changed == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test MosCtl
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Log in to Docker Hub
+        if: steps.upstream.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: kyleyu2024
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build local smoke-test image
+        if: steps.upstream.outputs.changed == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: mosctl:kernel-smoke
+          build-args: |
+            MOSDNS_IMAGE=${{ env.UPSTREAM_IMAGE }}@${{ steps.upstream.outputs.digest }}
+            MOSDNS_PLATFORM=linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test bundled binaries and Web service
+        if: steps.upstream.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mosdns_version="$(docker run --rm --platform linux/amd64 --entrypoint /usr/local/bin/mosdns mosctl:kernel-smoke version)"
+          test -n "$mosdns_version"
+          docker run --rm --platform linux/amd64 --entrypoint /usr/local/bin/mosctl mosctl:kernel-smoke --help >/dev/null
+
+          cleanup() {
+            docker rm -f mosctl-kernel-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d --name mosctl-kernel-smoke --platform linux/amd64 \
+            -e USERNAME=smoke -e PASSWORD=smoke-password \
+            mosctl:kernel-smoke >/dev/null
+
+          web_ready=false
+          for attempt_no in $(seq 1 15); do
+            if docker exec mosctl-kernel-smoke wget -qO- http://127.0.0.1:9090/ >/dev/null 2>&1; then
+              web_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$web_ready" != "true" ]]; then
+            docker logs mosctl-kernel-smoke
+            exit 1
+          fi
+          docker inspect mosctl-kernel-smoke --format '{{if not .State.Running}}{{.State.Error}}{{end}}' | grep -q '^$'
+          docker logs mosctl-kernel-smoke 2>&1 | grep -q 'config loaded'
+          echo "- MosDNS version: \`$mosdns_version\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push updated amd64 image
+        if: steps.upstream.outputs.changed == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: true
+          sbom: true
+          tags: |
+            ${{ env.TARGET_IMAGE }}:latest
+            ${{ env.TARGET_IMAGE }}:mosdns-${{ steps.upstream.outputs.short }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.upstream.outputs.docker_sha }}
+            io.mosctl.mosdns.digest=${{ steps.upstream.outputs.digest }}
+          build-args: |
+            MOSDNS_IMAGE=${{ env.UPSTREAM_IMAGE }}@${{ steps.upstream.outputs.digest }}
+            MOSDNS_PLATFORM=linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record published upstream digest
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          UPSTREAM_DIGEST: ${{ steps.upstream.outputs.digest }}
+          EXPECTED_DOCKER_SHA: ${{ steps.upstream.outputs.docker_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$DOCKER_BRANCH"
+          remote_sha="$(git rev-parse "origin/$DOCKER_BRANCH")"
+          if [[ "$remote_sha" != "$EXPECTED_DOCKER_SHA" ]]; then
+            echo "docker branch changed during the build; refusing to record a digest for stale source" >&2
+            exit 1
+          fi
+
+          printf '%s\n' "$UPSTREAM_DIGEST" > .github/mosdns-amd64.digest
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/mosdns-amd64.digest
+          if git diff --cached --quiet; then
+            echo "Digest unchanged; force rebuild completed without a state commit."
+            exit 0
+          fi
+          git commit -m "Update MosDNS amd64 base to ${UPSTREAM_DIGEST#sha256:} [skip ci]"
+          git push origin "HEAD:$DOCKER_BRANCH"
