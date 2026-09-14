@@ -7,7 +7,7 @@ bash <(wget -qO- https://ghproxy.net/https://raw.githubusercontent.com/KyleYu202
 ```yaml
 services:
   mosctl:
-    image: kyleyu2024/mosctl:latest
+    image: ghcr.io/kyleyu2024/mosctl:latest
     container_name: mosctl
     restart: always
     ports:
