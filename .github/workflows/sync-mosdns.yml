@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 concurrency:
   group: sync-mosdns-kernel
@@ -21,7 +22,7 @@ concurrency:
 
 env:
   UPSTREAM_IMAGE: irinesistiana/mosdns:latest
-  TARGET_IMAGE: kyleyu2024/mosctl
+  TARGET_IMAGE: ghcr.io/kyleyu2024/mosctl
   DOCKER_BRANCH: docker
 
 jobs:
@@ -93,23 +94,13 @@ jobs:
           go test ./...
           go vet ./...
 
-      - name: Verify Docker Hub credentials
-        if: steps.upstream.outputs.changed == 'true'
-        env:
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        shell: bash
-        run: |
-          if [[ -z "$DOCKERHUB_TOKEN" ]]; then
-            echo "Missing repository secret DOCKERHUB_TOKEN. See docs/AUTO_UPDATE.md." >&2
-            exit 1
-          fi
-
-      - name: Log in to Docker Hub
+      - name: Log in to GitHub Container Registry
         if: steps.upstream.outputs.changed == 'true'
         uses: docker/login-action@v4
         with:
-          username: kyleyu2024
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build local smoke-test image
         if: steps.upstream.outputs.changed == 'true'
