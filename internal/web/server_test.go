@@ -79,6 +79,31 @@ func TestRulesRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestReadRuleNormalizesWindowsLineEndings(t *testing.T) {
+	srv, _ := newTestServer(t)
+	if err := os.WriteFile(filepath.Join(srv.ruleDir, "hosts.txt"), []byte("a.test 10.0.0.1\r\nb.test 10.0.0.2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	handler := srv.Handler()
+	cookie := loginCookie(t, handler)
+	req := httptest.NewRequest(http.MethodGet, "/api/rules/hosts", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Content != "a.test 10.0.0.1\nb.test 10.0.0.2" {
+		t.Fatalf("content = %q", response.Content)
+	}
+}
+
 func TestLogoutIconAsset(t *testing.T) {
 	srv, _ := newTestServer(t)
 	for _, tc := range []struct {

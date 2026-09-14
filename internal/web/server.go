@@ -347,7 +347,9 @@ func (s *Server) readRule(spec ruleSpec) (string, os.FileInfo, error) {
 		return "", nil, err
 	}
 	info, _ := os.Stat(path)
-	return string(data), info, nil
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	return content, info, nil
 }
 
 func findRule(id string) (ruleSpec, bool) {

@@ -53,6 +53,7 @@ The duplicate active-rule heading has been removed. Save-and-apply now sits in a
 - Pass 8: replaced the temporary M icon with the approved deeper-blue circular rising-arrow logo, using transparent rounded corners for standard icons and an opaque full-bleed source for maskable and Apple icons. The service-worker cache version was advanced so installed clients refresh the artwork.
 - Pass 9: added a single-source version badge to the login card and authenticated header; both rendered states were checked with no wrapping or console errors. The release value is now `v0.5.4`.
 - Pass 10: removed the `MosDNS Rule Control` subtitle, changed iOS standalone status-bar mode from overlaying `black-translucent` to `black`, and restored safe-area padding inside the mobile media rule so device status content cannot overlap the header.
+- Pass 11: verified a CRLF `hosts.txt` fixture matching the NAS file. Selecting Hosts now canonicalizes line endings for display, leaves the dirty indicator empty, and keeps save-and-apply disabled until a real edit occurs.
 - Final browser pass found no remaining P0/P1/P2 issues.
 
 **Implementation Checklist**
