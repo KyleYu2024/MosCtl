@@ -1,0 +1,43 @@
+name: Build Linux binaries
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: go test ./...
+      - name: Build binary package
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist/package
+          go build -trimpath -ldflags='-s -w' -o dist/package/mosctl ./cmd/mosctl
+          cp templates/config.yaml dist/package/config.yaml
+          cp -r rules dist/package/rules
+          cp README.md dist/package/README.md
+          tar -czf dist/mosctl-linux-${GOARCH}.tar.gz -C dist/package .
+          cd dist
+          sha256sum mosctl-linux-${GOARCH}.tar.gz > checksums-${GOARCH}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mosctl-linux-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/checksums-*.txt

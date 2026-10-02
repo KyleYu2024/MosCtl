@@ -1,0 +1,39 @@
+# Binaries
+/mosctl
+/mosdns
+mosctl-*
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Mac System
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and Temp
+*.log
+*.tmp
+/dist/
+/tmp/
+
+# Local deployment credentials and runtime data
+.env
+.env.*
+!.env.example
+.web_session_key
+*.pem
+*.key
+/data/
+/config/
+
+# Go
+go.work*.tar
+mosdns_from_image
