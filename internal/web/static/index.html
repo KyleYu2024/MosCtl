@@ -65,15 +65,13 @@
       <form id="customTestForm" class="custom-test"><input id="customDomain" aria-label="自定义测试地址" placeholder="输入域名或网址，例如 example.com" required autocomplete="off"><button id="testCustom" class="button" type="submit">测试地址</button></form>
       <div id="customResult" class="test-result custom-result hidden" role="status"></div>
       <div class="test-results"><div id="baiduResult" class="test-result" role="status">百度 · www.baidu.com<br>尚未测试</div><div id="googleResult" class="test-result" role="status">谷歌 · www.google.com<br>尚未测试</div></div>
-      <div class="log-note">测试通过本机 MosDNS 解析域名，不检测网页访问；分流信息为规则参考。</div>
     </section>
     <section id="logsPage" class="logs-page hidden" aria-label="运行日志页面">
       <div class="diagnostic-bar"><button id="refreshLogs" class="button">刷新日志</button><label class="auto-refresh"><input id="autoLogs" type="checkbox" checked>自动刷新</label></div>
       <pre id="logContent" class="log-content" tabindex="0" aria-label="运行日志">加载日志中…</pre>
-      <div class="log-note">最近 256KB 运行日志 · 每 3 秒刷新 · 服务重启后重新记录。</div>
     </section>
     <section id="settingsPage" class="settings-page hidden" aria-label="上游设置">
-      <form id="remoteForm" class="settings-form"><h2>REMOTE 国外上游</h2><p>国外分流规则使用的 DNS 上游。支持 UDP、TCP、TLS 和 HTTPS。Web 保存后作为最终配置，服务重启也不会被环境变量覆盖。</p><label for="remoteAddress">上游地址</label><div class="field"><input id="remoteAddress" placeholder="udp://192.168.1.2:53" required autocomplete="off" spellcheck="false"></div><button id="saveRemote" class="button primary" type="submit" disabled>保存并应用</button><div id="remoteFeedback" class="settings-feedback" role="status"></div></form>
+      <form id="remoteForm" class="settings-form"><h2>REMOTE 国外上游</h2><p>国外分流规则使用的 DNS 上游。支持 UDP、TCP、TLS 和 HTTPS。</p><div class="field"><input id="remoteAddress" aria-label="REMOTE DNS" placeholder="udp://192.168.1.2:53" required autocomplete="off" spellcheck="false"></div><button id="saveRemote" class="button primary" type="submit" disabled>保存并应用</button><div id="remoteFeedback" class="settings-feedback" role="status"></div></form>
     </section>
   </main>
   <div id="toast" class="toast" role="status"></div>
