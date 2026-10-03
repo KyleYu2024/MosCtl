@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/KyleYu2024/mosctl/internal/config"
+	"github.com/KyleYu2024/mosctl/internal/diagnostics"
 	"github.com/KyleYu2024/mosctl/internal/service"
 	"github.com/KyleYu2024/mosctl/internal/version"
 	webui "github.com/KyleYu2024/mosctl/internal/web"
@@ -45,6 +46,12 @@ func runSupervisor() {
 
 	// 1. 初始化环境
 	initializeEnv()
+	statsDone := diagnostics.QueryStats.Start(ctx, "/etc/mosdns/query_stats.json")
+	if err := config.EnableQueryStats(); err != nil {
+		fmt.Printf("⚠️ 查询统计未启用: %v\n", err)
+	} else {
+		diagnostics.QueryStats.SetEnabled(true)
+	}
 
 	// 2. 环境变量处理
 	if local := os.Getenv("LOCAL_UPSTREAM"); local != "" {
@@ -83,6 +90,8 @@ func runSupervisor() {
 	cancel()
 
 	<-processDone
+	<-statsDone
+	diagnostics.QueryStats.Flush("/etc/mosdns/query_stats.json")
 	fmt.Println("👋 MosCtl 已安全关闭。")
 }
 

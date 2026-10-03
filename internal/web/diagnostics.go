@@ -19,6 +19,9 @@ import (
 func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"content": diagnostics.Logs.Snapshot(), "limit_bytes": 256 * 1024})
 }
+func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"enabled": diagnostics.QueryStats.Enabled(), "data": diagnostics.QueryStats.Snapshot()})
+}
 
 func (s *Server) testDNS(w http.ResponseWriter, r *http.Request) {
 	if !sameOrigin(r) {
@@ -99,7 +102,7 @@ func (s *Server) ruleHint(domain string) string {
 		for _, line := range strings.Split(string(hosts), "\n") {
 			fields := strings.Fields(strings.SplitN(line, "#", 2)[0])
 			if len(fields) > 1 && matchesDomain(domain, fields[0]) {
-				return "Hosts 规则匹配（规则参考，非实际查询追踪）"
+				return "Hosts 规则匹配"
 			}
 		}
 	}
@@ -121,7 +124,7 @@ func (s *Server) ruleHint(domain string) string {
 		}
 		file.Close()
 		if match {
-			return rule.label + " · " + rule.file + "（规则参考，非实际查询追踪）"
+			return rule.label + " · " + rule.file + ""
 		}
 	}
 	return "未匹配域名规则；默认模板走国外上游（实际路径可能受缓存、自定义配置和客户端 IP 规则影响）"

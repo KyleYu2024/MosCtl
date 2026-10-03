@@ -42,6 +42,37 @@ func Capture() error {
 	os.Stdout = writer
 	os.Stderr = writer
 	log.SetOutput(writer)
-	go func() { defer reader.Close(); _, _ = io.Copy(io.MultiWriter(stdout, Logs), reader) }()
+	go func() {
+		defer reader.Close()
+		_, _ = io.Copy(&consoleStream{output: io.MultiWriter(stdout, Logs)}, reader)
+	}()
 	return nil
+}
+
+type consoleStream struct {
+	output  io.Writer
+	pending string
+}
+
+func (s *consoleStream) Write(p []byte) (int, error) {
+	s.pending += string(p)
+	for {
+		end := strings.IndexByte(s.pending, '\n')
+		if end < 0 {
+			break
+		}
+		line := s.pending[:end]
+		s.pending = s.pending[end+1:]
+		if strings.Contains(line, "🚀 启动 MosDNS...") {
+			QueryStats.ResetPending()
+		}
+		if !QueryStats.Consume(line) {
+			_, _ = io.WriteString(s.output, line+"\n")
+		}
+	}
+	if len(s.pending) > 65536 {
+		_, _ = io.WriteString(s.output, s.pending)
+		s.pending = ""
+	}
+	return len(p), nil
 }

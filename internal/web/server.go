@@ -143,6 +143,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/settings/remote", s.requireAuth(s.saveRemote))
 	mux.HandleFunc("GET /api/rules", s.requireAuth(s.listRules))
 	mux.HandleFunc("GET /api/logs", s.requireAuth(s.logs))
+	mux.HandleFunc("GET /api/stats", s.requireAuth(s.stats))
 	mux.HandleFunc("POST /api/test/{target}", s.requireAuth(s.testDNS))
 	mux.HandleFunc("GET /api/rules/{id}", s.requireAuth(s.getRule))
 	mux.HandleFunc("PUT /api/rules/{id}", s.requireAuth(s.saveRule))
@@ -183,7 +184,7 @@ func (s *Server) servePublicAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveApp(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" && r.URL.Path != "/rules" && r.URL.Path != "/logs" && r.URL.Path != "/tests" && r.URL.Path != "/settings" {
+	if r.URL.Path != "/" && r.URL.Path != "/rules" && r.URL.Path != "/logs" && r.URL.Path != "/tests" && r.URL.Path != "/settings" && r.URL.Path != "/stats" {
 		http.NotFound(w, r)
 		return
 	}

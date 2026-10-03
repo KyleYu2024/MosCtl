@@ -85,7 +85,7 @@ func TestRemoteValidation(t *testing.T) {
 
 func TestPageRoutes(t *testing.T) {
 	srv, _ := newTestServer(t)
-	for _, path := range []string{"/rules", "/logs", "/tests", "/settings"} {
+	for _, path := range []string{"/rules", "/logs", "/tests", "/settings", "/stats"} {
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
 		if rec.Code != 200 {
