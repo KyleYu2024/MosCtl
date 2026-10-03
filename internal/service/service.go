@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -70,7 +71,7 @@ func RestartService() error {
 		restartMu.Unlock()
 		select {
 		case RestartChan <- struct{}{}:
-			fmt.Println("🔄 已请求重新加载 MosDNS")
+			log.Print("🔄 已请求重新加载 MosDNS")
 		default:
 			// 如果已经有一个信号在等待，就不重复发送
 		}
@@ -139,6 +140,6 @@ func DownloadFile(url, dest string) (bool, error) {
 		return false, err
 	}
 
-	fmt.Printf("✅ 文件已更新: %s\n", filepath.Base(dest))
+	log.Printf("✅ 文件已更新: %s\n", filepath.Base(dest))
 	return true, nil
 }

@@ -3,6 +3,7 @@ package rule
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -74,7 +75,7 @@ func AddRule(content string, rType RuleType) error {
 		return fmt.Errorf("读取规则文件失败: %v", err)
 	}
 	if exists {
-		fmt.Printf("⚠️  内容 %s 已经在 [%s] 中了，跳过添加。\n", content, listName)
+		log.Printf("⚠️  内容 %s 已经在 [%s] 中了，跳过添加。\n", content, listName)
 		return nil
 	}
 
@@ -109,16 +110,16 @@ func AddRule(content string, rType RuleType) error {
 		return err
 	}
 
-	fmt.Printf("✅ 已将 %s 添加到 [%s]\n", content, listName)
+	log.Printf("✅ 已将 %s 添加到 [%s]\n", content, listName)
 
 	// 5. 重启生效 (使用 Restart 避免 Systemd Reload 报错)
-	fmt.Println("🔄 正在重载服务以生效规则...")
+	log.Print("🔄 正在重载服务以生效规则...")
 	if err := service.RestartService(); err != nil {
-		fmt.Printf("❌ 规则已写入但服务重启失败: %v\n", err)
+		log.Printf("❌ 规则已写入但服务重启失败: %v\n", err)
 		return err
 	}
 
-	fmt.Println("🎉 服务重载成功，规则已生效！")
+	log.Print("🎉 服务重载成功，规则已生效！")
 	return nil
 }
 

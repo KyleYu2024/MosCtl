@@ -232,7 +232,7 @@ func EnsureMetricsServer() error {
 					for _, p := range pluginsNode.Content {
 						tagNode := findValueNode(p, "tag")
 						if tagNode != nil && (tagNode.Value == "prometheus_metrics" || tagNode.Value == "metrics_server") {
-							fmt.Printf("🧹 正在从 plugins 中清理旧的指标配置: %s\n", tagNode.Value)
+							log.Printf("🧹 正在从 plugins 中清理旧的指标配置: %s\n", tagNode.Value)
 							continue // 跳过，不添加到新列表中
 						}
 						newPlugins = append(newPlugins, p)
@@ -256,7 +256,7 @@ func EnsureMetricsServer() error {
 			return nil
 		}
 
-		fmt.Println("📢 正在为现有配置启用 HTTP API (用于统计)...")
+		log.Print("📢 正在为现有配置启用 HTTP API (用于统计)...")
 
 		// 3. 创建 api: { http: "127.0.0.1:8080" } 节点
 		apiValue := &yaml.Node{
@@ -433,7 +433,7 @@ func SetCacheTTL(ttl string) error {
 }
 
 func FlushCache() error {
-	fmt.Println("🧹 正在清空 DNS 缓存...")
+	log.Print("🧹 正在清空 DNS 缓存...")
 	os.Remove("/etc/mosdns/cache.dump")
 	ClearHistory()
 	return service.RestartService()
@@ -527,7 +527,7 @@ func SetLogLevel(level string) error {
 }
 
 func RunTest(ctx context.Context) bool {
-	fmt.Println("🩺 MosDNS 解析诊断...")
+	log.Print("🩺 MosDNS 解析诊断...")
 	allOK := true
 	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, network, "127.0.0.1:53")
@@ -545,12 +545,12 @@ func RunTest(ctx context.Context) bool {
 		}
 		if err != nil {
 			allOK = false
-			fmt.Printf("❌ %s（%s）解析失败: %v\n", target.label, target.domain, err)
+			log.Printf("❌ %s（%s）解析失败: %v\n", target.label, target.domain, err)
 		} else {
-			fmt.Printf("✅ %s（%s）%s → %s\n", target.label, target.domain, time.Since(start).Round(time.Millisecond), strings.Join(ips, ", "))
+			log.Printf("✅ %s（%s）%s → %s\n", target.label, target.domain, time.Since(start).Round(time.Millisecond), strings.Join(ips, ", "))
 		}
 	}
-	fmt.Println("解析诊断完成。")
+	log.Print("解析诊断完成。")
 	return allOK
 }
 
