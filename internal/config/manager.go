@@ -2,12 +2,13 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,7 +36,7 @@ type PersistentStats struct {
 
 // GetCacheStats 获取缓存统计信息 (包含历史累加)
 func GetCacheStats() (string, error) {
-	resp, err := http.Get("http://127.0.0.1:8080/metrics")
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Get("http://127.0.0.1:8080/metrics")
 	if err != nil {
 		return "", fmt.Errorf("无法连接到指标服务器: %v", err)
 	}
@@ -94,7 +95,7 @@ func GetCacheStats() (string, error) {
 
 // SaveCurrentStatsToHistory 在重启前保存当前活跃统计到历史记录
 func SaveCurrentStatsToHistory() {
-	resp, err := http.Get("http://127.0.0.1:8080/metrics")
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Get("http://127.0.0.1:8080/metrics")
 	if err != nil {
 		return // 可能是进程已经退出了，直接放弃
 	}
@@ -525,34 +526,32 @@ func SetLogLevel(level string) error {
 	})
 }
 
-func RunTest() {
-	fmt.Println("\n🩺 启动后连通性诊断...")
-
-	testDomain := func(domain, label string) {
-		fmt.Printf("  Testing %s (%s) ... ", label, domain)
-
-		cmd := exec.Command("nslookup", domain, "127.0.0.1")
+func RunTest(ctx context.Context) bool {
+	fmt.Println("🩺 MosDNS 解析诊断...")
+	allOK := true
+	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, network, "127.0.0.1:53")
+	}}
+	for _, target := range []struct{ domain, label string }{{"www.baidu.com", "国内"}, {"www.google.com", "国外"}} {
+		if ctx.Err() != nil {
+			return false
+		}
+		queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 		start := time.Now()
-		output, err := cmd.CombinedOutput()
-		duration := time.Since(start)
-
-		if err == nil {
-			fmt.Printf("✅ Pass (%v)", duration.Round(time.Millisecond))
-			lines := strings.Split(string(output), "\n")
-			for _, line := range lines {
-				if strings.HasPrefix(line, "Address:") && !strings.Contains(line, "#53") && !strings.Contains(line, "127.0.0.1") {
-					fmt.Printf(" -> %s\n", strings.TrimSpace(strings.TrimPrefix(line, "Address:")))
-					break
-				}
-			}
+		ips, err := resolver.LookupHost(queryCtx, target.domain)
+		cancel()
+		if ctx.Err() != nil {
+			return false
+		}
+		if err != nil {
+			allOK = false
+			fmt.Printf("❌ %s（%s）解析失败: %v\n", target.label, target.domain, err)
 		} else {
-			fmt.Printf("❌ Failed\n")
+			fmt.Printf("✅ %s（%s）%s → %s\n", target.label, target.domain, time.Since(start).Round(time.Millisecond), strings.Join(ips, ", "))
 		}
 	}
-
-	testDomain("www.baidu.com", "🇨🇳 国内")
-	testDomain("www.google.com", "🌍 国外")
-	fmt.Println("🎉 解析诊断完成。")
+	fmt.Println("解析诊断完成。")
+	return allOK
 }
 
 func RestartViaKill() error {

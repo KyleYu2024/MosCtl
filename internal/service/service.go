@@ -14,40 +14,39 @@ import (
 )
 
 const (
-	SystemCtl  = "systemctl"
-	EnvMode    = "MOSCTL_MODE"
-	ModeDocker = "docker"
+	SystemCtl   = "systemctl"
+	EnvMode     = "MOSCTL_MODE"
+	ModeManaged = "managed"
 )
 
-// DockerRestartChan 用于 Docker 模式下的重启信号
-var DockerRestartChan = make(chan struct{}, 1)
+// RestartChan requests a restart of the MosDNS child process.
+var RestartChan = make(chan struct{}, 1)
 
 var (
-	dockerRestartMu   sync.Mutex
-	lastDockerRestart time.Time
+	restartMu   sync.Mutex
+	lastRestart time.Time
 )
 
-// IsDockerMode 返回当前是否处于 Docker 模式
-func IsDockerMode() bool {
+func IsManagedMode() bool {
 	// 使用 strings.TrimSpace 避免潜在的格式问题
 	mode := strings.TrimSpace(os.Getenv(EnvMode))
-	return mode == ModeDocker
+	return mode == ModeManaged || mode == "docker" // compatibility with older installations
 }
 
 // RestartService restarts the mosdns service
 func RestartService() error {
 	// 无论如何，优先检查环境变量
-	if IsDockerMode() {
-		dockerRestartMu.Lock()
-		if time.Since(lastDockerRestart) < 1500*time.Millisecond {
-			dockerRestartMu.Unlock()
+	if IsManagedMode() {
+		restartMu.Lock()
+		if time.Since(lastRestart) < 1500*time.Millisecond {
+			restartMu.Unlock()
 			return nil
 		}
-		lastDockerRestart = time.Now()
-		dockerRestartMu.Unlock()
+		lastRestart = time.Now()
+		restartMu.Unlock()
 		select {
-		case DockerRestartChan <- struct{}{}:
-			fmt.Println("🔄 Docker 模式: 已发送重启信号")
+		case RestartChan <- struct{}{}:
+			fmt.Println("🔄 已请求重新加载 MosDNS")
 		default:
 			// 如果已经有一个信号在等待，就不重复发送
 		}
@@ -58,20 +57,19 @@ func RestartService() error {
 		return exec.Command(SystemCtl, "restart", "mosdns").Run()
 	}
 
-	fmt.Printf("⚠️  未找到 systemctl 且非 Docker 模式 (MODE=%q), 跳过服务重启\n", os.Getenv(EnvMode))
-	return nil
+	return fmt.Errorf("未启用进程管理且未找到 systemctl，无法重载 MosDNS")
 }
 
 // ReloadService reloads the mosdns service
 func ReloadService() error {
-	if IsDockerMode() {
+	if IsManagedMode() {
 		return RestartService()
 	}
 
 	if _, err := exec.LookPath(SystemCtl); err == nil {
 		return exec.Command(SystemCtl, "reload", "mosdns").Run()
 	}
-	return nil
+	return fmt.Errorf("未找到 systemctl，无法重载 MosDNS")
 }
 
 // DownloadFile downloads a file from URL to dest, only if content is different.

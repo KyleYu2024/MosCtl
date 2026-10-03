@@ -20,11 +20,12 @@ import (
 )
 
 var dockerCmd = &cobra.Command{
-	Use:   "docker",
-	Short: "Run MosCtl in Docker mode",
+	Use:    "docker",
+	Short:  "Compatibility alias for managed MosCtl",
+	Hidden: true,
 	Run: func(cmd *cobra.Command, args []string) {
-		os.Setenv("MOSCTL_MODE", "docker")
-		runDockerPanel()
+		os.Setenv(service.EnvMode, service.ModeManaged)
+		runSupervisor()
 	},
 }
 
@@ -32,18 +33,18 @@ func init() {
 	rootCmd.AddCommand(dockerCmd)
 }
 
-func runDockerPanel() {
+func runSupervisor() {
 	fmt.Println("=====================================")
-	fmt.Printf("             MosCtl Docker (v%s)  \n", version.Current)
+	fmt.Printf("             MosCtl (v%s)  \n", version.Current)
 	fmt.Println("=====================================")
 
-	os.Setenv("MOSCTL_MODE", "docker")
+	os.Setenv(service.EnvMode, service.ModeManaged)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// 1. 初始化环境
-	initializeDockerEnv()
+	initializeEnv()
 
 	// 2. 环境变量处理
 	if local := os.Getenv("LOCAL_UPSTREAM"); local != "" {
@@ -57,7 +58,8 @@ func runDockerPanel() {
 	fmt.Printf("[%s] ⚙️  配置就绪: LOCAL=%s, REMOTE=%s\n", time.Now().Format("2006-01-02 15:04:05"), currLocal, currRemote)
 
 	// 3. 进程管理协程
-	go processManager(ctx)
+	processDone := make(chan struct{})
+	go func() { defer close(processDone); processManager(ctx) }()
 
 	// 4. 事件驱动文件监控 (fsnotify)
 	go fileWatcher(ctx)
@@ -71,23 +73,16 @@ func runDockerPanel() {
 	// 7. 统计任务 (渐进式播报)
 	go statsScheduler(ctx)
 
-	// 8. 诊断
-	go func() {
-		time.Sleep(3 * time.Second)
-		config.RunTest()
-		fmt.Printf("[%s] 🚀 MosDNS 内核启动成功，分流规则已全面生效。\n", time.Now().Format("2006-01-02 15:04:05"))
-		fmt.Printf("[%s] 🟢 正在按策略分流 DNS 请求，系统运行状态正常...\n", time.Now().Format("2006-01-02 15:04:05"))
-	}()
-
 	// 9. 信号捕获
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	sig := <-sigChan
 	fmt.Printf("\n[%s] 📥 接收到信号 %v，准备优雅退出...\n", time.Now().Format("2006-01-02 15:04:05"), sig)
 	cancel()
 
-	time.Sleep(1 * time.Second)
+	<-processDone
 	fmt.Println("👋 MosCtl 已安全关闭。")
 }
 
@@ -132,55 +127,76 @@ func printStats() {
 
 // processManager 核心进程管理逻辑
 func processManager(ctx context.Context) {
-	var mosdnsCmd *exec.Cmd
-
-	for {
-		select {
-		case <-ctx.Done():
-			if mosdnsCmd != nil && mosdnsCmd.Process != nil {
-				fmt.Println("🛑 正在终止 MosDNS 进程...")
-				config.SaveCurrentStatsToHistory()
-				mosdnsCmd.Process.Signal(syscall.SIGTERM)
-			}
-			return
-		default:
-			fmt.Printf("[%s] 🚀 启动 MosDNS...\n", time.Now().Format("2006-01-02 15:04:05"))
-			mosdnsCmd = exec.Command("/usr/local/bin/mosdns", "start", "-c", "/etc/mosdns/config.yaml")
-			mosdnsCmd.Stdout = os.Stdout
-			mosdnsCmd.Stderr = os.Stderr
-
-			if err := mosdnsCmd.Start(); err != nil {
-				fmt.Printf("❌ 启动失败: %v, 5秒后重试...\n", err)
-				time.Sleep(5 * time.Second)
-				continue
-			}
-
-			done := make(chan error, 1)
-			go func() { done <- mosdnsCmd.Wait() }()
-
-			select {
-			case err := <-done:
-				if ctx.Err() != nil {
-					return
-				}
-				fmt.Printf("[%s] ⚠️  MosDNS 进程已退出 (err: %v)，准备重启...\n", time.Now().Format("2006-01-02 15:04:05"), err)
-				config.SaveCurrentStatsToHistory()
-				time.Sleep(1 * time.Second)
-			case <-service.DockerRestartChan:
-				fmt.Printf("[%s] 🔄 收到重启信号，正在准备热重载...\n", time.Now().Format("2006-01-02 15:04:05"))
-				printStats()
-				if mosdnsCmd != nil && mosdnsCmd.Process != nil {
-					config.SaveCurrentStatsToHistory()
-					mosdnsCmd.Process.Kill()
-				}
-			case <-ctx.Done():
-				if mosdnsCmd != nil && mosdnsCmd.Process != nil {
-					config.SaveCurrentStatsToHistory()
-					mosdnsCmd.Process.Signal(syscall.SIGTERM)
-				}
+	for ctx.Err() == nil {
+		fmt.Printf("[%s] 🚀 启动 MosDNS...\n", time.Now().Format("2006-01-02 15:04:05"))
+		child := exec.Command(config.MosDNSBin, "start", "-c", config.ConfigPath)
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			fmt.Printf("❌ 启动失败: %v，5 秒后重试\n", err)
+			if !waitForRetry(ctx, 5*time.Second) {
 				return
 			}
+			continue
 		}
+		done := make(chan error, 1)
+		go func() { done <- child.Wait() }()
+		childCtx, cancel := context.WithCancel(ctx)
+		go func() {
+			if !waitForRetry(childCtx, time.Second) {
+				return
+			}
+			healthy := config.RunTest(childCtx)
+			if childCtx.Err() != nil {
+				return
+			}
+			if healthy {
+				fmt.Printf("[%s] 🟢 MosDNS DNS 解析检查通过。\n", time.Now().Format("2006-01-02 15:04:05"))
+			} else {
+				fmt.Printf("[%s] ⚠️ DNS 解析检查未全部通过，请检查上游与网络。\n", time.Now().Format("2006-01-02 15:04:05"))
+			}
+		}()
+		select {
+		case err := <-done:
+			cancel()
+			fmt.Printf("[%s] ⚠️ MosDNS 已退出（%v），稍后重试。\n", time.Now().Format("2006-01-02 15:04:05"), err)
+			if !waitForRetry(ctx, time.Second) {
+				return
+			}
+		case <-service.RestartChan:
+			cancel()
+			config.SaveCurrentStatsToHistory()
+			fmt.Printf("[%s] 🔄 正在重新加载 MosDNS...\n", time.Now().Format("2006-01-02 15:04:05"))
+			stopChild(child, done)
+		case <-ctx.Done():
+			cancel()
+			config.SaveCurrentStatsToHistory()
+			stopChild(child, done)
+			return
+		}
+	}
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func stopChild(child *exec.Cmd, done <-chan error) {
+	_ = child.Process.Signal(syscall.SIGTERM)
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		fmt.Println("⚠️ MosDNS 退出超时，强制结束旧进程。")
+		_ = child.Process.Kill()
+		<-done
 	}
 }
 
@@ -201,6 +217,11 @@ func fileWatcher(ctx context.Context) {
 	}
 
 	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 
 	for {
 		select {
@@ -213,13 +234,16 @@ func fileWatcher(ctx context.Context) {
 
 			filename := filepath.Base(event.Name)
 			isConfig := filename == "config.yaml"
-			isRule := strings.HasSuffix(event.Name, ".txt") || strings.Contains(event.Name, "/rules/")
+			isRule := filepath.Dir(event.Name) == config.RuleDir && strings.HasSuffix(filename, ".txt") && !strings.HasPrefix(filename, ".")
 
 			if (isConfig || isRule) && (event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0) {
 				if timer != nil {
 					timer.Stop()
 				}
 				timer = time.AfterFunc(1*time.Second, func() {
+					if ctx.Err() != nil {
+						return
+					}
 					fmt.Printf("[%s] 📝 检测到文件变更: %s, 准备重启...\n", time.Now().Format("2006-01-02 15:04:05"), event.Name)
 					service.RestartService()
 				})
@@ -286,7 +310,7 @@ func UpdateGeoRules() {
 	}
 }
 
-func initializeDockerEnv() {
+func initializeEnv() {
 	if err := os.MkdirAll("/etc/mosdns/rules", 0755); err != nil {
 		fmt.Printf("❌ 无法创建规则目录: %v\n", err)
 	}

@@ -9,10 +9,9 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "mosctl",
-	Short: "MosCtl - A management tool for MosDNS (Docker Native)",
+	Short: "MosCtl - MosDNS process and Web management",
 	Run: func(cmd *cobra.Command, args []string) {
-		os.Setenv("MOSCTL_MODE", "docker")
-		runDockerPanel()
+		runSupervisor()
 	},
 }
 
