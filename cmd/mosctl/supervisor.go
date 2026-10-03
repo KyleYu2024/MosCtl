@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -41,7 +42,7 @@ func runSupervisor() {
 	defer cancel()
 
 	if err := kernel.Recover(config.MosDNSBin); err != nil {
-		fmt.Printf("❌ 未完成的内核更新恢复失败: %v\n", err)
+		log.Printf("❌ 未完成的内核更新恢复失败: %v\n", err)
 		return
 	}
 
@@ -49,7 +50,7 @@ func runSupervisor() {
 	initializeEnv()
 	statsDone := diagnostics.QueryStats.Start(ctx, "/etc/mosdns/query_stats.json")
 	if err := config.EnableQueryStats(); err != nil {
-		fmt.Printf("⚠️ 查询统计未启用: %v\n", err)
+		log.Printf("⚠️ 查询统计未启用: %v\n", err)
 	} else {
 		diagnostics.QueryStats.SetEnabled(true)
 	}
@@ -93,7 +94,7 @@ func runSupervisor() {
 	<-processDone
 	<-statsDone
 	diagnostics.QueryStats.Flush("/etc/mosdns/query_stats.json")
-	fmt.Println("👋 MosCtl 已安全关闭。")
+	log.Print("👋 MosCtl 已安全关闭。")
 }
 
 // statsScheduler 实现渐进式播报策略
@@ -152,7 +153,7 @@ func processManager(ctx context.Context) {
 				acknowledgement <- err
 				acknowledgement = nil
 			}
-			fmt.Printf("❌ 启动失败: %v，5 秒后重试\n", err)
+			log.Printf("❌ 启动失败: %v，5 秒后重试\n", err)
 			if !waitForRetry(ctx, 5*time.Second) {
 				return
 			}
@@ -223,7 +224,7 @@ func stopChild(child *exec.Cmd, done <-chan error) {
 	select {
 	case <-done:
 	case <-timer.C:
-		fmt.Println("⚠️ MosDNS 退出超时，强制结束旧进程。")
+		log.Print("⚠️ MosDNS 退出超时，强制结束旧进程。")
 		_ = child.Process.Kill()
 		<-done
 	}
@@ -233,7 +234,7 @@ func stopChild(child *exec.Cmd, done <-chan error) {
 func fileWatcher(ctx context.Context) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		fmt.Printf("❌ 无法启动监控: %v\n", err)
+		log.Printf("❌ 无法启动监控: %v\n", err)
 		return
 	}
 	defer watcher.Close()
@@ -241,7 +242,7 @@ func fileWatcher(ctx context.Context) {
 	watchDirs := []string{"/etc/mosdns", "/etc/mosdns/rules"}
 	for _, dir := range watchDirs {
 		if err := watcher.Add(dir); err != nil {
-			fmt.Printf("⚠️ 无法监控目录 %s: %v\n", dir, err)
+			log.Printf("⚠️ 无法监控目录 %s: %v\n", dir, err)
 		}
 	}
 
@@ -281,7 +282,7 @@ func fileWatcher(ctx context.Context) {
 			if !ok {
 				return
 			}
-			fmt.Printf("❌ 监控错误: %v\n", err)
+			log.Printf("❌ 监控错误: %v\n", err)
 		}
 	}
 }
@@ -310,7 +311,7 @@ func cronScheduler(ctx context.Context) {
 
 // UpdateGeoRules 更新 GeoIP 和 GeoSite 规则
 func UpdateGeoRules() {
-	fmt.Println("⬇️  正在执行计划内 GeoSite/GeoIP 更新...")
+	log.Print("⬇️  正在执行计划内 GeoSite/GeoIP 更新...")
 
 	os.MkdirAll("/etc/mosdns/rules", 0755)
 
@@ -326,26 +327,26 @@ func UpdateGeoRules() {
 	for url, path := range files {
 		updated, err := service.DownloadFile(url, path)
 		if err != nil {
-			fmt.Printf("⚠️  下载失败 %s: %v (将跳过该文件)\n", path, err)
+			log.Printf("⚠️  下载失败 %s: %v (将跳过该文件)\n", path, err)
 		} else if updated {
 			anyUpdated = true
 		}
 	}
 
 	if anyUpdated {
-		fmt.Println("🎉 规则文件已更新，fsnotify 将自动触发重启。")
+		log.Print("🎉 规则文件已更新，fsnotify 将自动触发重启。")
 	} else {
-		fmt.Println("✅ 规则已是最新，无需更新。")
+		log.Print("✅ 规则已是最新，无需更新。")
 	}
 }
 
 func initializeEnv() {
 	if err := os.MkdirAll("/etc/mosdns/rules", 0755); err != nil {
-		fmt.Printf("❌ 无法创建规则目录: %v\n", err)
+		log.Printf("❌ 无法创建规则目录: %v\n", err)
 	}
 
 	if _, err := os.Stat("/etc/mosdns/config.yaml"); os.IsNotExist(err) {
-		fmt.Println("📢 初始化配置模板...")
+		log.Print("📢 初始化配置模板...")
 		copyFile("/usr/share/mosdns/config.yaml", "/etc/mosdns/config.yaml")
 
 		files, _ := filepath.Glob("/usr/share/mosdns/rules/*.txt")
@@ -368,7 +369,7 @@ func initializeEnv() {
 			os.WriteFile(rf, []byte{}, 0644)
 		}
 	}
-	fmt.Println("✅ 运行环境初始化核验完成。")
+	log.Print("✅ 运行环境初始化核验完成。")
 }
 
 func copyFile(src, dst string) error {
