@@ -12,7 +12,7 @@ bash <(wget -qO- https://ghproxy.net/https://raw.githubusercontent.com/KyleYu202
 
 脚本自动识别 amd64/arm64，下载并校验最新 Release 的 MosCtl 安装包，安装 MosDNS v5 内核，配置 systemd 并启动服务。脚本和安装包默认通过 `ghproxy.net` 下载，方便国内环境使用；本机需安装 `wget`，且 53 端口未被其他服务占用。
 
-完成后访问 `http://<本机IP>:9090`，用户名为 `admin`，随机密码会在安装结束时显示（保存在 `/etc/mosctl.env`）。登录后在设置页修改 REMOTE 国外 DNS 上游。
+首次安装按提示设置用户名（回车默认 `admin`）、密码及确认密码，密码输入隐藏。完成后访问 `http://<本机IP>:9090`，使用刚设置的账号登录，在设置页修改 REMOTE 国外 DNS 上游。账号配置保存在 `/etc/mosctl.env`（权限 `600`）。
 
 再次执行同一条命令即可升级 MosCtl，保留已有配置、账号、规则、统计数据及 MosDNS 内核。在命令前加 `VERSION=vX.Y.Z` 可指定版本；加 `GITHUB_PROXY=https://其他代理` 可切换安装包下载代理，`GITHUB_PROXY= bash ...` 使用直连。MosDNS 内核通过 Web 设置页更新。
 

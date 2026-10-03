@@ -16,6 +16,39 @@ case $(uname -m) in
   *) echo '不支持当前 CPU 架构。' >&2; exit 1 ;;
 esac
 [[ $VERSION == latest || $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'VERSION 应为 latest 或 vX.Y.Z。' >&2; exit 1; }
+new_login=false
+if [[ ! -e /etc/mosctl.env ]]; then
+  # 从终端读取，兼容 bash <(wget ...) 和管道执行。
+  exec 3<> /dev/tty || { echo '首次安装需要交互终端，请通过 SSH 终端运行。' >&2; exit 1; }
+  printf '\n[1/3] 设置 Web 登录账号\n' >&3
+  while true; do
+    printf '用户名 [admin]：' >&3
+    IFS= read -r username <&3
+    username=${username:-admin}
+    if [[ $username =~ ^[a-zA-Z0-9_.-]+$ ]]; then break; fi
+    printf '用户名仅支持字母、数字、下划线、点和连字符。\n' >&3
+  done
+  while true; do
+    printf '设置密码（输入隐藏）：' >&3
+    IFS= read -r -s password <&3
+    printf '\n' >&3
+    if [[ -z $password ]]; then
+      printf '密码不能为空，请重新输入。\n' >&3
+      continue
+    fi
+    printf '再次输入密码：' >&3
+    IFS= read -r -s confirmation <&3
+    printf '\n' >&3
+    if [[ $password == "$confirmation" ]]; then break; fi
+    printf '两次密码不一致，请重新输入。\n' >&3
+  done
+  unset confirmation
+  exec 3>&-
+  new_login=true
+else
+  echo '[1/3] 检测到已有配置，保留登录账号和设置。'
+fi
+echo '[2/3] 安装依赖、下载并校验安装包…'
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl unzip dnsutils tar
 work=$(mktemp -d)
@@ -53,17 +86,19 @@ fi
 mkdir -p /usr/local/bin /usr/share/mosdns/rules /etc/mosdns/rules
 install -m 0644 "$work/package/config.yaml" /usr/share/mosdns/config.yaml
 cp -a "$work/package/rules/." /usr/share/mosdns/rules/
-new_login=false
-if [[ ! -e /etc/mosctl.env ]]; then
-  password=$(od -An -N18 -tx1 /dev/urandom | tr -d ' \n')
+echo '[3/3] 配置并启动服务…'
+if $new_login; then
+  # systemd EnvironmentFile 的双引号值需转义反斜杠和双引号。
+  escaped_password=${password//\\/\\\\}
+  escaped_password=${escaped_password//\"/\\\"}
   (umask 077; cat > /etc/mosctl.env <<ENV
-USERNAME=admin
-PASSWORD=$password
+USERNAME=$username
+PASSWORD="$escaped_password"
 WEB_LISTEN=:9090
 TZ=Asia/Shanghai
 ENV
   )
-  new_login=true
+  unset password escaped_password
 fi
 if [[ ! -e /etc/systemd/system/mosctl.service ]]; then
   cat > /etc/systemd/system/mosctl.service <<'SERVICE'
@@ -99,7 +134,7 @@ if ! systemctl is-active --quiet mosctl; then
 fi
 printf '\n安装完成，访问 http://<本机IP>:9090\n'
 if $new_login; then
-  printf '用户名：admin\n密码：%s\n' "$password"
+  printf '用户名：%s\n密码：安装时设置的密码\n' "$username"
 else
   echo '沿用 /etc/mosctl.env 中的登录账号和设置。'
 fi
