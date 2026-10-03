@@ -13,6 +13,7 @@ import (
 
 	"github.com/KyleYu2024/mosctl/internal/config"
 	"github.com/KyleYu2024/mosctl/internal/diagnostics"
+	"github.com/KyleYu2024/mosctl/internal/kernel"
 	"github.com/KyleYu2024/mosctl/internal/service"
 	"github.com/KyleYu2024/mosctl/internal/version"
 	webui "github.com/KyleYu2024/mosctl/internal/web"
@@ -43,6 +44,11 @@ func runSupervisor() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	if err := kernel.Recover(config.MosDNSBin); err != nil {
+		fmt.Printf("❌ 未完成的内核更新恢复失败: %v\n", err)
+		return
+	}
 
 	// 1. 初始化环境
 	initializeEnv()
@@ -136,16 +142,30 @@ func printStats() {
 
 // processManager 核心进程管理逻辑
 func processManager(ctx context.Context) {
+	var acknowledgement chan error
+	defer func() {
+		if acknowledgement != nil {
+			acknowledgement <- context.Canceled
+		}
+	}()
 	for ctx.Err() == nil {
 		fmt.Printf("[%s] 🚀 启动 MosDNS...\n", time.Now().Format("2006-01-02 15:04:05"))
 		child := exec.Command(config.MosDNSBin, "start", "-c", config.ConfigPath)
 		child.Stdout, child.Stderr = os.Stdout, os.Stderr
 		if err := child.Start(); err != nil {
+			if acknowledgement != nil {
+				acknowledgement <- err
+				acknowledgement = nil
+			}
 			fmt.Printf("❌ 启动失败: %v，5 秒后重试\n", err)
 			if !waitForRetry(ctx, 5*time.Second) {
 				return
 			}
 			continue
+		}
+		if acknowledgement != nil {
+			acknowledgement <- nil
+			acknowledgement = nil
 		}
 		done := make(chan error, 1)
 		go func() { done <- child.Wait() }()
@@ -171,6 +191,11 @@ func processManager(ctx context.Context) {
 			if !waitForRetry(ctx, time.Second) {
 				return
 			}
+		case request := <-service.RestartRequests:
+			cancel()
+			config.SaveCurrentStatsToHistory()
+			stopChild(child, done)
+			acknowledgement = request.Done
 		case <-service.RestartChan:
 			cancel()
 			config.SaveCurrentStatsToHistory()

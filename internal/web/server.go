@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/KyleYu2024/mosctl/internal/kernel"
 	"github.com/KyleYu2024/mosctl/internal/service"
 	"github.com/KyleYu2024/mosctl/internal/version"
 )
@@ -53,17 +54,20 @@ var editableRules = []ruleSpec{
 
 type Options struct {
 	RuleDir string
+	Context context.Context
 	Restart func() error
 	Logger  *log.Logger
 }
 
 type Server struct {
-	ruleDir    string
-	restart    func() error
-	logger     *log.Logger
-	username   string
-	password   string
-	sessionKey []byte
+	kernel        *kernel.Manager
+	kernelContext context.Context
+	ruleDir       string
+	restart       func() error
+	logger        *log.Logger
+	username      string
+	password      string
+	sessionKey    []byte
 
 	mu       sync.Mutex
 	attempts map[string]*loginAttempt
@@ -96,15 +100,21 @@ func New(opts Options) (*Server, error) {
 	credentialMAC := hmac.New(sha256.New, sessionKey)
 	credentialMAC.Write([]byte(username + "\x00" + password))
 	sessionKey = credentialMAC.Sum(nil)
-	return &Server{
+	srv := &Server{
 		ruleDir: opts.RuleDir, restart: opts.Restart, logger: opts.Logger,
 		username: username, password: password, sessionKey: sessionKey,
 		attempts: make(map[string]*loginAttempt),
-	}, nil
+	}
+	srv.kernelContext = opts.Context
+	if srv.kernelContext == nil {
+		srv.kernelContext = context.Background()
+	}
+	srv.kernel = newKernelManager()
+	return srv, nil
 }
 
 func Run(ctx context.Context) {
-	srv, err := New(Options{})
+	srv, err := New(Options{Context: ctx})
 	if err != nil {
 		log.Printf("⚠️ Web 管理页未启动: %v", err)
 		return
@@ -139,6 +149,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", s.requireAuth(s.logout))
 	mux.HandleFunc("GET /api/session", s.session)
+	mux.HandleFunc("GET /api/settings/kernel", s.requireAuth(s.getKernel))
+	mux.HandleFunc("POST /api/settings/kernel/{action}", s.requireAuth(s.kernelAction))
 	mux.HandleFunc("GET /api/settings/remote", s.requireAuth(s.getRemote))
 	mux.HandleFunc("PUT /api/settings/remote", s.requireAuth(s.saveRemote))
 	mux.HandleFunc("GET /api/rules", s.requireAuth(s.listRules))

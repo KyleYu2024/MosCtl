@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,29 @@ const (
 
 // RestartChan requests a restart of the MosDNS child process.
 var RestartChan = make(chan struct{}, 1)
+
+// RestartRequests acknowledges only after the old child exits and its replacement starts.
+type RestartRequest struct{ Done chan error }
+
+var RestartRequests = make(chan RestartRequest)
+
+func RestartAndWait(ctx context.Context) error {
+	if !IsManagedMode() {
+		return fmt.Errorf("内核更新需要 MosCtl 进程管理模式")
+	}
+	request := RestartRequest{Done: make(chan error, 1)}
+	select {
+	case RestartRequests <- request:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-request.Done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 var (
 	restartMu   sync.Mutex
