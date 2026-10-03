@@ -31,6 +31,7 @@
     @media(max-width:760px){.page-nav{margin-bottom:12px}.test-results{grid-template-columns:1fr}.auto-refresh{margin-left:0}.log-content{padding:12px}.diagnostic-bar{gap:8px}}
     .custom-test{display:flex;gap:10px;flex-shrink:0}.custom-test input{width:100%;min-width:0;border:0;border-radius:10px;background:var(--surface);color:var(--text);padding:0 12px;height:40px}.custom-test .button{white-space:nowrap;height:40px}.custom-result{flex-shrink:0}
     .custom-test input:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--gold)}
+    .test-card{background:var(--surface);border-radius:10px;padding:14px 16px;min-width:0}.test-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;font-size:13px}.test-card-head .button{height:34px;padding:0 12px;flex-shrink:0;font-size:12px}.test-card .test-result{padding:0;background:transparent;border-radius:0}
     .settings-page{flex:1;min-height:0;overflow:auto}.settings-form{max-width:700px;background:var(--surface);border-radius:13px;padding:24px}.settings-form h2{font-size:20px;margin:0 0 8px}.settings-form p{font-size:13px;color:var(--muted);line-height:1.7}.settings-form input{width:100%;height:44px;border:0;border-radius:10px;background:var(--bg);color:var(--text);padding:0 12px}.settings-form .button{margin-top:18px}.settings-feedback{margin-top:14px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}.settings-feedback.error{color:var(--danger)}.settings-feedback.success{color:var(--success)}
   </style>
 </head>
@@ -61,10 +62,9 @@
       </section>
     </section>
     <section id="testsPage" class="logs-page hidden" aria-label="DNS 测试">
-      <div class="diagnostic-bar"><button id="testBaidu" class="button">测试百度</button><button id="testGoogle" class="button">测试谷歌</button></div>
-      <form id="customTestForm" class="custom-test"><input id="customDomain" aria-label="自定义测试地址" placeholder="输入域名或网址，例如 example.com" required autocomplete="off"><button id="testCustom" class="button" type="submit">测试地址</button></form>
+      <form id="customTestForm" class="custom-test"><input id="customDomain" aria-label="自定义测试地址" required autocomplete="off"><button id="testCustom" class="button" type="submit">测试</button></form>
       <div id="customResult" class="test-result custom-result hidden" role="status"></div>
-      <div class="test-results"><div id="baiduResult" class="test-result" role="status">百度 · www.baidu.com<br>尚未测试</div><div id="googleResult" class="test-result" role="status">谷歌 · www.google.com<br>尚未测试</div></div>
+      <div class="test-results"><div class="test-card"><div class="test-card-head"><span>百度 · www.baidu.com</span><button id="testBaidu" class="button">测试百度</button></div><div id="baiduResult" class="test-result" role="status">尚未测试</div></div><div class="test-card"><div class="test-card-head"><span>谷歌 · www.google.com</span><button id="testGoogle" class="button">测试谷歌</button></div><div id="googleResult" class="test-result" role="status">尚未测试</div></div></div>
     </section>
     <section id="logsPage" class="logs-page hidden" aria-label="运行日志页面">
       <div class="diagnostic-bar"><button id="refreshLogs" class="button">刷新日志</button><label class="auto-refresh"><input id="autoLogs" type="checkbox" checked>自动刷新</label></div>
