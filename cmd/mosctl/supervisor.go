@@ -15,7 +15,6 @@ import (
 	"github.com/KyleYu2024/mosctl/internal/diagnostics"
 	"github.com/KyleYu2024/mosctl/internal/kernel"
 	"github.com/KyleYu2024/mosctl/internal/service"
-	"github.com/KyleYu2024/mosctl/internal/version"
 	webui "github.com/KyleYu2024/mosctl/internal/web"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
@@ -36,10 +35,6 @@ func init() {
 }
 
 func runSupervisor() {
-	fmt.Println("=====================================")
-	fmt.Printf("             MosCtl (v%s)  \n", version.Current)
-	fmt.Println("=====================================")
-
 	os.Setenv(service.EnvMode, service.ModeManaged)
 
 	ctx, cancel := context.WithCancel(context.Background())
