@@ -528,7 +528,7 @@ func SetLogLevel(level string) error {
 }
 
 func RunTest(ctx context.Context) bool {
-	log.Print("🩺 MosDNS 解析诊断...")
+	log.Print("🔎 MosDNS 解析诊断...")
 	allOK := true
 	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, network, "127.0.0.1:53")
