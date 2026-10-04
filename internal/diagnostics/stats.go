@@ -17,20 +17,22 @@ type DomainCount struct {
 	Count  uint64 `json:"count"`
 }
 type HourCount struct {
+	Time   string `json:"time,omitempty"`
 	Hour   int    `json:"hour"`
 	Local  uint64 `json:"local"`
 	Remote uint64 `json:"remote"`
 	Other  uint64 `json:"other"`
 }
 type StatsData struct {
-	Day       string        `json:"day"`
-	StartedAt string        `json:"started_at"`
-	Local     uint64        `json:"local"`
-	Remote    uint64        `json:"remote"`
-	Other     uint64        `json:"other"`
-	Domains   []DomainCount `json:"domains"`
-	Hours     []HourCount   `json:"hours"`
-	Overflow  uint64        `json:"unranked"`
+	RecentHours []HourCount   `json:"recent_hours"`
+	Day         string        `json:"day"`
+	StartedAt   string        `json:"started_at"`
+	Local       uint64        `json:"local"`
+	Remote      uint64        `json:"remote"`
+	Other       uint64        `json:"other"`
+	Domains     []DomainCount `json:"domains"`
+	Hours       []HourCount   `json:"hours"`
+	Overflow    uint64        `json:"unranked"`
 }
 type Collector struct {
 	mu      sync.Mutex
@@ -46,7 +48,8 @@ func (c *Collector) resetDay(now time.Time) {
 	if c.data.Day == now.Format("2006-01-02") && c.domains != nil {
 		return
 	}
-	c.data = StatsData{Day: now.Format("2006-01-02"), StartedAt: now.Format(time.RFC3339), Hours: make([]HourCount, 24)}
+	recent := c.data.RecentHours
+	c.data = StatsData{RecentHours: recent, Day: now.Format("2006-01-02"), StartedAt: now.Format(time.RFC3339), Hours: make([]HourCount, 24)}
 	for i := range c.data.Hours {
 		c.data.Hours[i].Hour = i
 	}
@@ -95,6 +98,8 @@ func (c *Collector) Consume(line string) bool {
 	if name == "" {
 		return true
 	}
+	c.data.RecentHours = rollingHours(c.data.RecentHours, now)
+	recent := &c.data.RecentHours[len(c.data.RecentHours)-1]
 	bucket := &c.data.Hours[now.Hour()]
 	category := "other"
 	switch actual {
@@ -102,13 +107,16 @@ func (c *Collector) Consume(line string) bool {
 		category = "local"
 		c.data.Local++
 		bucket.Local++
+		recent.Local++
 	case "REMOTE":
 		category = "remote"
 		c.data.Remote++
 		bucket.Remote++
+		recent.Remote++
 	default:
 		c.data.Other++
 		bucket.Other++
+		recent.Other++
 	}
 	key := category + ":" + name
 	item := c.domains[key]
@@ -128,7 +136,9 @@ func (c *Collector) Snapshot() StatsData {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.resetDay(time.Now())
+	c.data.RecentHours = rollingHours(c.data.RecentHours, time.Now())
 	data := c.data
+	data.RecentHours = append([]HourCount(nil), c.data.RecentHours...)
 	data.Hours = append([]HourCount(nil), c.data.Hours...)
 	data.Domains = make([]DomainCount, 0, len(c.domains))
 	for _, item := range c.domains {
@@ -155,8 +165,17 @@ func (c *Collector) Start(ctx context.Context, path string) <-chan struct{} {
 	done := make(chan struct{})
 	if data, err := os.ReadFile(path); err == nil {
 		var saved StatsData
-		if json.Unmarshal(data, &saved) == nil && saved.Day == time.Now().Format("2006-01-02") && len(saved.Hours) == 24 {
+		if json.Unmarshal(data, &saved) == nil && len(saved.Hours) == 24 {
 			c.mu.Lock()
+			if len(saved.RecentHours) == 0 {
+				for _, h := range saved.Hours {
+					stamp, err := time.ParseInLocation("2006-01-02", saved.Day, time.Local)
+					if err == nil {
+						h.Time = stamp.Add(time.Duration(h.Hour) * time.Hour).Format(time.RFC3339)
+						saved.RecentHours = append(saved.RecentHours, h)
+					}
+				}
+			}
 			c.data = saved
 			c.domains = make(map[string]*DomainCount)
 			for i, item := range saved.Domains {
@@ -205,3 +224,21 @@ func (c *Collector) save(path string) {
 	_ = os.Rename(file.Name(), path)
 }
 func (c *Collector) Flush(path string) { c.save(path) }
+
+// Keep the current partial hour and the preceding 23 hourly buckets.
+func rollingHours(previous []HourCount, now time.Time) []HourCount {
+	end := now.Truncate(time.Hour)
+	values := make(map[string]HourCount)
+	for _, h := range previous {
+		values[h.Time] = h
+	}
+	result := make([]HourCount, 24)
+	for i := range result {
+		stamp := end.Add(time.Duration(i-23) * time.Hour)
+		key := stamp.Format(time.RFC3339)
+		result[i] = values[key]
+		result[i].Time = key
+		result[i].Hour = stamp.Hour()
+	}
+	return result
+}
