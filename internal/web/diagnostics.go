@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/KyleYu2024/mosctl/internal/diagnostics"
+	"github.com/KyleYu2024/mosctl/internal/service"
 )
 
 func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
@@ -146,4 +147,46 @@ func matchesDomain(domain, rule string) bool {
 		rule = strings.ToLower(strings.TrimPrefix(rule, "domain:"))
 		return domain == rule || strings.HasSuffix(domain, "."+rule)
 	}
+}
+
+func (s *Server) restartDNS(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		writeError(w, http.StatusForbidden, "请求来源无效")
+		return
+	}
+	if !s.restartOpMu.TryLock() {
+		writeError(w, http.StatusConflict, "正在重启，请稍候")
+		return
+	}
+	defer s.restartOpMu.Unlock()
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	s.logger.Print("🔄 用户请求重启 MosDNS")
+	if err := service.RestartAndWait(ctx); err != nil {
+		writeError(w, 500, "重启失败："+err.Error())
+		return
+	}
+	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		return (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, network, "127.0.0.1:53")
+	}}
+	for _, domain := range []string{"www.baidu.com", "www.google.com"} {
+		var lastErr error
+		for attempt := 0; attempt < 20; attempt++ {
+			_, lastErr = resolver.LookupHost(ctx, domain)
+			if lastErr == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				writeError(w, 500, "重启后解析检查超时")
+				return
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+		if lastErr != nil {
+			writeError(w, 500, "重启后解析检查失败："+domain+"："+lastErr.Error())
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "message": "MosDNS 已重启，国内、国外解析检查通过"})
 }

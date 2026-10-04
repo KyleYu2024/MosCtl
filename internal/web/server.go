@@ -69,8 +69,9 @@ type Server struct {
 	password      string
 	sessionKey    []byte
 
-	mu       sync.Mutex
-	attempts map[string]*loginAttempt
+	restartOpMu sync.Mutex
+	mu          sync.Mutex
+	attempts    map[string]*loginAttempt
 }
 
 type loginAttempt struct {
@@ -147,6 +148,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sw.js", s.servePublicAsset)
 	mux.HandleFunc("GET /assets/", s.servePublicAsset)
 	mux.HandleFunc("POST /api/login", s.login)
+	mux.HandleFunc("POST /api/restart", s.requireAuth(s.restartDNS))
 	mux.HandleFunc("POST /api/logout", s.requireAuth(s.logout))
 	mux.HandleFunc("GET /api/session", s.session)
 	mux.HandleFunc("GET /api/settings/kernel", s.requireAuth(s.getKernel))
