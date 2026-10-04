@@ -30,7 +30,53 @@ func (b *LogBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (b *LogBuffer) Snapshot() string { b.mu.Lock(); defer b.mu.Unlock(); return b.text }
+func (b *LogBuffer) Snapshot() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return compactLifecycleLogs(b.text)
+}
+
+// Keep the original detail in the bounded buffer so a failed startup can show
+// its full context. Only successful lifecycle sequences are collapsed.
+func compactLifecycleLogs(raw string) string {
+	var result, pending strings.Builder
+	active, failed := false, false
+	for _, line := range strings.SplitAfter(raw, "\n") {
+		info := strings.Contains(line, "\tINFO\t")
+		start := info && (strings.Contains(line, "\tmain config loaded") || strings.Contains(line, "\tstarting shutdown sequences"))
+		end := info && (strings.Contains(line, "\tall plugins are loaded") || strings.Contains(line, "\tall plugins were closed"))
+		if start {
+			result.WriteString(pending.String())
+			pending.Reset()
+			active, failed = true, false
+		}
+		if !active {
+			result.WriteString(line)
+			continue
+		}
+		pending.WriteString(line)
+		if strings.Contains(line, "\tERROR\t") || strings.Contains(line, "\tFATAL\t") || strings.Contains(line, "\tPANIC\t") {
+			failed = true
+		}
+		if end {
+			if failed {
+				result.WriteString(pending.String())
+			} else {
+				// Warnings remain visible, including the normal socket-close warning.
+				for _, detail := range strings.SplitAfter(pending.String(), "\n") {
+					if detail != "" && !strings.Contains(detail, "\tINFO\t") {
+						result.WriteString(detail)
+					}
+				}
+				result.WriteString(line)
+			}
+			pending.Reset()
+			active = false
+		}
+	}
+	result.WriteString(pending.String())
+	return result.String()
+}
 
 // Capture preserves Docker console output while retaining a bounded in-memory tail.
 func Capture() error {
