@@ -754,7 +754,11 @@ textarea:focus-visible {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  scrollbar-width: none;
   padding: 0 2px 20px;
+}
+.stats-page::-webkit-scrollbar {
+  display: none;
 }
 .stat-cards {
   display: grid;

@@ -1,4 +1,4 @@
-const CACHE_NAME = "mosctl-shell-v16";
+const CACHE_NAME = "mosctl-shell-v17";
 const APP_SHELL = [
   "/",
   "/assets/app.css",
