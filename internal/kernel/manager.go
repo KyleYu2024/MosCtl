@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/KyleYu2024/mosctl/internal/service"
 )
 
 const releaseAPI = "https://api.github.com/repos/IrineSistiana/mosdns/releases/latest"
@@ -448,6 +450,10 @@ func (m *Manager) refresh() {
 	m.status.UpdateAvailable = newer(m.status.Latest, current)
 }
 func (m *Manager) install(ctx context.Context, candidate string) error {
+	if !service.OperationMu.TryLock() {
+		return errors.New("正在应用配置或重启 DNS，请稍后重试")
+	}
+	defer service.OperationMu.Unlock()
 	defer m.refresh()
 	pending := m.opts.Binary + ".mosctl-pending"
 	if _, err := os.Stat(pending); err == nil {

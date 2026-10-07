@@ -8,7 +8,7 @@ import (
 
 func TestDiagnosticsRequireLogin(t *testing.T) {
 	srv, _ := newTestServer(t)
-	for _, route := range []struct{ method, path string }{{"GET", "/api/logs"}, {"GET", "/api/stats"}, {"POST", "/api/test/baidu"}} {
+	for _, route := range []struct{ method, path string }{{"GET", "/api/logs"}, {"GET", "/api/stats"}, {"GET", "/api/health"}, {"POST", "/api/test/baidu"}} {
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, httptest.NewRequest(route.method, route.path, nil))
 		if rec.Code != http.StatusUnauthorized {

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/KyleYu2024/mosctl/internal/service"
 	"gopkg.in/yaml.v3"
 )
 
@@ -114,8 +115,11 @@ func (s *Server) saveRemote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if !service.OperationMu.TryLock() {
+		writeError(w, 409, "正在应用配置或更新内核，请稍后再试")
+		return
+	}
+	defer service.OperationMu.Unlock()
 	configPath := filepath.Join(filepath.Dir(s.ruleDir), "config.yaml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -143,34 +147,9 @@ func (s *Server) saveRemote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "配置编码失败")
 		return
 	}
-	file, err := os.CreateTemp(filepath.Dir(configPath), ".remote-config-*")
-	if err != nil {
-		writeError(w, 500, "无法保存配置")
+	if err = s.applyFile(r.Context(), configPath, updated, true); err != nil {
+		writeError(w, 500, err.Error())
 		return
 	}
-	defer os.Remove(file.Name())
-	mode := os.FileMode(0644)
-	if info, e := os.Stat(configPath); e == nil {
-		mode = info.Mode().Perm()
-	}
-	err = file.Chmod(mode)
-	if err == nil {
-		_, err = file.Write(updated)
-	}
-	closeErr := file.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = os.Rename(file.Name(), configPath)
-	}
-	if err != nil {
-		writeError(w, 500, "保存配置失败")
-		return
-	}
-	if err = s.restart(); err != nil {
-		writeJSON(w, 500, map[string]any{"saved": true, "error": "配置已保存，但重载请求失败"})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"remote": addrValue, "message": "REMOTE 已保存，已请求重载 MosDNS"})
+	writeJSON(w, 200, map[string]any{"remote": addrValue, "message": "REMOTE 已保存并应用，DNS 检查通过"})
 }

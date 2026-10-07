@@ -46,32 +46,34 @@ type ruleSpec struct {
 }
 
 var editableRules = []ruleSpec{
-	{ID: "force-cn", Name: "强制国内", Filename: "force-cn.txt", Description: "始终使用国内 DNS 解析的域名"},
-	{ID: "force-nocn", Name: "强制国外", Filename: "force-nocn.txt", Description: "始终使用国外 DNS 解析的域名"},
+	{ID: "force-cn", Name: "强制国内", Filename: "force-cn.txt", Description: "优先于自动规则，使用国内 DNS 解析"},
+	{ID: "force-nocn", Name: "强制国外", Filename: "force-nocn.txt", Description: "优先于自动规则，使用国外 DNS 解析"},
 	{ID: "user-iot", Name: "IoT 设备", Filename: "user_iot.txt", Description: "指定直连的设备 IP 或 CIDR"},
 	{ID: "hosts", Name: "Hosts", Filename: "hosts.txt", Description: "自定义域名与 IP 映射"},
 }
 
 type Options struct {
-	RuleDir string
-	Context context.Context
-	Restart func() error
-	Logger  *log.Logger
+	RuleDir    string
+	DNSAddress string
+	Context    context.Context
+	Restart    func() error
+	Apply      func(context.Context) error
+	Logger     *log.Logger
 }
 
 type Server struct {
 	kernel        *kernel.Manager
 	kernelContext context.Context
 	ruleDir       string
-	restart       func() error
+	dnsAddress    string
+	apply         func(context.Context) error
 	logger        *log.Logger
 	username      string
 	password      string
 	sessionKey    []byte
 
-	restartOpMu sync.Mutex
-	mu          sync.Mutex
-	attempts    map[string]*loginAttempt
+	mu       sync.Mutex
+	attempts map[string]*loginAttempt
 }
 
 type loginAttempt struct {
@@ -85,8 +87,18 @@ func New(opts Options) (*Server, error) {
 	if username == "" || password == "" {
 		return nil, errors.New("USERNAME 和 PASSWORD 必须同时配置")
 	}
+	if opts.DNSAddress == "" {
+		opts.DNSAddress = "127.0.0.1:53"
+	}
 	if opts.RuleDir == "" {
 		opts.RuleDir = "/etc/mosdns/rules"
+	}
+	if opts.Apply == nil {
+		if opts.Restart != nil {
+			opts.Apply = func(context.Context) error { return opts.Restart() }
+		} else {
+			opts.Apply = applyDNS
+		}
 	}
 	if opts.Restart == nil {
 		opts.Restart = service.RestartService
@@ -102,7 +114,7 @@ func New(opts Options) (*Server, error) {
 	credentialMAC.Write([]byte(username + "\x00" + password))
 	sessionKey = credentialMAC.Sum(nil)
 	srv := &Server{
-		ruleDir: opts.RuleDir, restart: opts.Restart, logger: opts.Logger,
+		ruleDir: opts.RuleDir, dnsAddress: opts.DNSAddress, apply: opts.Apply, logger: opts.Logger,
 		username: username, password: password, sessionKey: sessionKey,
 		attempts: make(map[string]*loginAttempt),
 	}
@@ -127,7 +139,7 @@ func Run(ctx context.Context) {
 	httpServer := &http.Server{
 		Addr: listen, Handler: srv.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
-		WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,
+		WriteTimeout: 90 * time.Second, IdleTimeout: 60 * time.Second,
 	}
 	go func() {
 		<-ctx.Done()
@@ -157,6 +169,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/settings/remote", s.requireAuth(s.saveRemote))
 	mux.HandleFunc("GET /api/rules", s.requireAuth(s.listRules))
 	mux.HandleFunc("GET /api/logs", s.requireAuth(s.logs))
+	mux.HandleFunc("GET /api/health", s.requireAuth(s.health))
 	mux.HandleFunc("GET /api/stats", s.requireAuth(s.stats))
 	mux.HandleFunc("POST /api/test/{target}", s.requireAuth(s.testDNS))
 	mux.HandleFunc("GET /api/rules/{id}", s.requireAuth(s.getRule))
@@ -170,6 +183,8 @@ func (s *Server) servePublicAsset(w http.ResponseWriter, r *http.Request) {
 		contentType string
 	}{
 		"/manifest.webmanifest":         {"manifest.webmanifest", "application/manifest+json"},
+		"/assets/app.css":               {"app.css", "text/css; charset=utf-8"},
+		"/assets/app.js":                {"app.js", "application/javascript; charset=utf-8"},
 		"/sw.js":                        {"sw.js", "application/javascript; charset=utf-8"},
 		"/assets/logout.svg":            {"logout.svg", "image/svg+xml"},
 		"/assets/icon-192.png":          {"icon-192.png", "image/png"},
@@ -188,7 +203,7 @@ func (s *Server) servePublicAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", asset.contentType)
-	if r.URL.Path == "/sw.js" {
+	if r.URL.Path == "/sw.js" || r.URL.Path == "/assets/app.css" || r.URL.Path == "/assets/app.js" {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Service-Worker-Allowed", "/")
 	} else {
@@ -323,42 +338,33 @@ func (s *Server) saveRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateRule(spec.ID, content); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	if !service.OperationMu.TryLock() {
+		writeError(w, 409, "正在应用配置或更新内核，请稍后再试")
+		return
+	}
+	defer service.OperationMu.Unlock()
+	if err := s.checkRuleConflict(spec.ID, content); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
 	if err := os.MkdirAll(s.ruleDir, 0755); err != nil {
-		writeError(w, http.StatusInternalServerError, "无法创建规则目录")
+		writeError(w, 500, "无法创建规则目录")
 		return
 	}
 	path := filepath.Join(s.ruleDir, spec.Filename)
-	tmp, err := os.CreateTemp(s.ruleDir, ".mosctl-rule-*")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "无法保存规则")
+	if err := s.applyFile(r.Context(), path, []byte(content), req.Apply); err != nil {
+		writeError(w, 500, err.Error())
 		return
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0644); err == nil {
-		_, err = io.WriteString(tmp, content)
+	message := "规则已保存并应用，DNS 检查通过"
+	if !req.Apply {
+		message = "规则已保存，尚未应用"
 	}
-	closeErr := tmp.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = os.Rename(tmpName, path)
-	}
-	if err != nil {
-		s.logger.Printf("保存规则 %s 失败: %v", spec.Filename, err)
-		writeError(w, http.StatusInternalServerError, "无法保存规则")
-		return
-	}
-	message := "规则已保存"
-	if req.Apply {
-		if err := s.restart(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "规则已保存，但 MosDNS 重载失败", "saved": true})
-			return
-		}
-		message = "规则已保存并应用"
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": message, "entries": countEntries(content)})
+	writeJSON(w, 200, map[string]any{"ok": true, "message": message, "entries": countEntries(content), "content": content})
 }
 
 func (s *Server) readRule(spec ruleSpec) (string, os.FileInfo, error) {
@@ -477,23 +483,7 @@ func loadOrCreateSessionKey(configDir string) ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
-	tmp, err := os.CreateTemp(configDir, ".web-session-key-*")
-	if err != nil {
-		return nil, err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0600); err == nil {
-		_, err = tmp.Write(key)
-	}
-	closeErr := tmp.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = os.Rename(tmpName, keyPath)
-	}
-	if err != nil {
+	if err := service.AtomicWrite(keyPath, key, 0600); err != nil {
 		return nil, err
 	}
 	return key, nil
@@ -523,7 +513,7 @@ func (s *Server) recordFailedLogin(ip string) {
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")

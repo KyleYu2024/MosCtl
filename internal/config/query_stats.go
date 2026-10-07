@@ -52,6 +52,23 @@ func instrumentQueryStats(root *yaml.Node) error {
 			args.Content = append([]*yaml.Node{summaryStep(label, "")}, args.Content...)
 		}
 	}
+	for _, args := range sequences {
+		var steps []*yaml.Node
+		for _, step := range args.Content {
+			exec := findValueNode(step, "exec")
+			if exec != nil && strings.HasPrefix(exec.Value, "reject") {
+				if len(steps) == 0 || findValueNode(steps[len(steps)-1], "exec") == nil || findValueNode(steps[len(steps)-1], "exec").Value != "query_summary MOSCTL_STATS_REJECTED" {
+					marker := summaryStep("REJECTED", "")
+					if match := findValueNode(step, "matches"); match != nil {
+						marker.Content = append(marker.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "matches"}, match)
+					}
+					steps = append(steps, marker)
+				}
+			}
+			steps = append(steps, step)
+		}
+		args.Content = steps
+	}
 	main := sequences["main_sequence"]
 	var updated []*yaml.Node
 	for i, step := range main.Content {

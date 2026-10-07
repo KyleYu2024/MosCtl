@@ -1,6 +1,8 @@
-const CACHE_NAME = "mosctl-shell-v15";
+const CACHE_NAME = "mosctl-shell-v16";
 const APP_SHELL = [
   "/",
+  "/assets/app.css",
+  "/assets/app.js",
   "/manifest.webmanifest",
   "/assets/logout.svg",
   "/assets/icon-192.png?v=3",

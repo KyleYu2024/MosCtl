@@ -206,13 +206,11 @@ func updateConfigSilent(fn func(root *yaml.Node) error) error {
 		return nil
 	}
 
-	tmpFile := ConfigPath + ".tmp"
-	if err := os.WriteFile(tmpFile, updatedData, 0644); err != nil {
-		return err
+	mode := os.FileMode(0644)
+	if info, err := os.Stat(ConfigPath); err == nil {
+		mode = info.Mode().Perm()
 	}
-
-	// 原子替换
-	return os.Rename(tmpFile, ConfigPath)
+	return service.AtomicWrite(ConfigPath, updatedData, mode)
 }
 
 // EnsureMetricsServer 确保配置中包含指标监控服务器 (v5 API 模式，并清理旧版错误插件)
@@ -304,11 +302,11 @@ func updateConfig(fn func(root *yaml.Node) error) error {
 		return nil
 	}
 
-	tmpFile := ConfigPath + ".tmp"
-	if err := os.WriteFile(tmpFile, updatedData, 0644); err != nil {
-		return err
+	mode := os.FileMode(0644)
+	if info, err := os.Stat(ConfigPath); err == nil {
+		mode = info.Mode().Perm()
 	}
-	if err := os.Rename(tmpFile, ConfigPath); err != nil {
+	if err := service.AtomicWrite(ConfigPath, updatedData, mode); err != nil {
 		return err
 	}
 
@@ -317,6 +315,9 @@ func updateConfig(fn func(root *yaml.Node) error) error {
 
 // 递归查找键名并返回其值的节点
 func findValueNode(node *yaml.Node, keyName string) *yaml.Node {
+	if node == nil {
+		return nil
+	}
 	if node.Kind == yaml.DocumentNode {
 		for _, content := range node.Content {
 			if n := findValueNode(content, keyName); n != nil {
@@ -415,7 +416,7 @@ func findAddrNodeByComment(node *yaml.Node, tag string) *yaml.Node {
 func EnsureDefaultTTL() error {
 	return updateConfigSilent(func(root *yaml.Node) error {
 		node := findValueNode(root, "lazy_cache_ttl")
-		if node != nil {
+		if node != nil && node.Value == "" {
 			node.Value = "86400"
 		}
 		return nil

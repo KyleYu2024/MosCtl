@@ -10,8 +10,8 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "mosctl",
 	Short: "MosCtl - MosDNS process and Web management",
-	Run: func(cmd *cobra.Command, args []string) {
-		runSupervisor()
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSupervisor()
 	},
 }
 

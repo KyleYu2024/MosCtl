@@ -11,8 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/KyleYu2024/mosctl/internal/ruleformat"
 )
 
 const (
@@ -47,11 +48,6 @@ func RestartAndWait(ctx context.Context) error {
 	}
 }
 
-var (
-	restartMu   sync.Mutex
-	lastRestart time.Time
-)
-
 func IsManagedMode() bool {
 	// 使用 strings.TrimSpace 避免潜在的格式问题
 	mode := strings.TrimSpace(os.Getenv(EnvMode))
@@ -62,13 +58,6 @@ func IsManagedMode() bool {
 func RestartService() error {
 	// 无论如何，优先检查环境变量
 	if IsManagedMode() {
-		restartMu.Lock()
-		if time.Since(lastRestart) < 1500*time.Millisecond {
-			restartMu.Unlock()
-			return nil
-		}
-		lastRestart = time.Now()
-		restartMu.Unlock()
 		select {
 		case RestartChan <- struct{}{}:
 			log.Print("🔄 已请求重新加载 MosDNS")
@@ -112,15 +101,25 @@ func DownloadFile(url, dest string) (bool, error) {
 	}
 
 	// 1. 读取新内容到内存
-	newContent, err := io.ReadAll(resp.Body)
+	newContent, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20+1))
 	if err != nil {
 		return false, err
 	}
 
+	if len(newContent) > 16<<20 {
+		return false, fmt.Errorf("规则文件超过 16 MB")
+	}
 	if len(newContent) < 100 {
 		return false, fmt.Errorf("下载内容太小，可能是错误的响应")
 	}
 
+	id := "force-cn"
+	if filepath.Base(dest) == "geoip_cn.txt" {
+		id = "user-iot"
+	}
+	if err := ruleformat.Validate(id, string(newContent)); err != nil {
+		return false, fmt.Errorf("下载规则校验失败: %w", err)
+	}
 	// 2. 读取旧内容进行对比
 	oldContent, err := os.ReadFile(dest)
 	if err == nil && bytes.Equal(oldContent, newContent) {
@@ -129,14 +128,7 @@ func DownloadFile(url, dest string) (bool, error) {
 	}
 
 	// 3. 内容不一致，原子写入
-	tmpDest := dest + ".tmp"
-	if err := os.WriteFile(tmpDest, newContent, 0644); err != nil {
-		return false, err
-	}
-
-	// 原子替换
-	if err := os.Rename(tmpDest, dest); err != nil {
-		os.Remove(tmpDest)
+	if err := AtomicWrite(dest, newContent, 0644); err != nil {
 		return false, err
 	}
 

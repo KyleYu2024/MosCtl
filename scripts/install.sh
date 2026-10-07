@@ -132,6 +132,18 @@ if ! systemctl is-active --quiet mosctl; then
   echo '服务启动失败，请执行 journalctl -u mosctl -n 50 排查（检查 53 端口是否占用）。' >&2
   exit 1
 fi
+dns_ready=false
+for attempt_no in $(seq 1 10); do
+  if dig @127.0.0.1 www.baidu.com A +time=1 +tries=1 +short | grep -q '[0-9]'; then
+    dns_ready=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$dns_ready" != true ]]; then
+  echo 'MosCtl 已启动，但 DNS 未通过就绪检查，请执行 journalctl -u mosctl -n 50 排查。' >&2
+  exit 1
+fi
 printf '\n安装完成，访问 http://<本机IP>:9090\n'
 if $new_login; then
   printf '用户名：%s\n密码：安装时设置的密码\n' "$username"

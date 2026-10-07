@@ -37,3 +37,6 @@ mosctl-*
 # Go
 go.work*.tar
 mosdns_from_image
+
+# Local operational review contains deployment-specific details.
+docs/CODE_WEB_REVIEW_2026-10-07.md

@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/KyleYu2024/mosctl/internal/version"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -113,6 +114,8 @@ func TestLogoutIconAsset(t *testing.T) {
 		{"/assets/logout.svg", "image/svg+xml"},
 		{"/manifest.webmanifest", "application/manifest+json"},
 		{"/sw.js", "application/javascript; charset=utf-8"},
+		{"/assets/app.js", "application/javascript; charset=utf-8"},
+		{"/assets/app.css", "text/css; charset=utf-8"},
 		{"/assets/icon-192.png", "image/png"},
 		{"/assets/icon-512.png", "image/png"},
 		{"/assets/icon-maskable-512.png", "image/png"},
@@ -139,13 +142,14 @@ func TestAppShowsVersion(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "v0.6.3") || strings.Contains(body, "{{VERSION}}") {
+	if !strings.Contains(body, "v"+version.Current) || strings.Contains(body, "{{VERSION}}") {
 		t.Fatalf("rendered page does not contain the resolved version")
 	}
 	if strings.Contains(body, "MosDNS Rule Control") {
 		t.Fatalf("removed subtitle is still present")
 	}
-	if !strings.Contains(body, `apple-mobile-web-app-status-bar-style" content="black"`) || !strings.Contains(body, "safe-area-inset-top") {
+	css, _ := staticFiles.ReadFile("static/app.css")
+	if !strings.Contains(body, "apple-mobile-web-app-status-bar-style") || !strings.Contains(body, `content="black"`) || !bytes.Contains(css, []byte("safe-area-inset-top")) {
 		t.Fatalf("mobile safe-area metadata or CSS is missing")
 	}
 }

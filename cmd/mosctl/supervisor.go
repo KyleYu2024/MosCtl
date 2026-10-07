@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -25,9 +26,9 @@ var dockerCmd = &cobra.Command{
 	Use:    "docker",
 	Short:  "Compatibility alias for managed MosCtl",
 	Hidden: true,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		os.Setenv(service.EnvMode, service.ModeManaged)
-		runSupervisor()
+		return runSupervisor()
 	},
 }
 
@@ -35,19 +36,28 @@ func init() {
 	rootCmd.AddCommand(dockerCmd)
 }
 
-func runSupervisor() {
+func runSupervisor() error {
 	os.Setenv(service.EnvMode, service.ModeManaged)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if err := kernel.Recover(config.MosDNSBin); err != nil {
-		log.Printf("❌ 未完成的内核更新恢复失败: %v\n", err)
-		return
+		return fmt.Errorf("未完成的内核更新恢复失败: %w", err)
 	}
 
+	for _, path := range []string{config.ConfigPath, filepath.Join(config.RuleDir, "force-cn.txt"), filepath.Join(config.RuleDir, "force-nocn.txt"), filepath.Join(config.RuleDir, "user_iot.txt"), filepath.Join(config.RuleDir, "hosts.txt"), filepath.Join(config.RuleDir, "geosite_cn.txt"), filepath.Join(config.RuleDir, "geosite_no_cn.txt"), filepath.Join(config.RuleDir, "geosite_apple.txt"), filepath.Join(config.RuleDir, "geoip_cn.txt")} {
+		if err := service.RecoverFile(path); err != nil {
+			return fmt.Errorf("配置恢复失败: %w", err)
+		}
+	}
 	// 1. 初始化环境
-	initializeEnv()
+	if err := initializeEnv(); err != nil {
+		return err
+	}
+	if err := config.OptimizeStandard(); err != nil {
+		log.Printf("⚠️ 标准配置优化未应用: %v", err)
+	}
 	statsDone := diagnostics.QueryStats.Start(ctx, "/etc/mosdns/query_stats.json")
 	if err := config.EnableQueryStats(); err != nil {
 		log.Printf("⚠️ 查询统计未启用: %v\n", err)
@@ -57,15 +67,24 @@ func runSupervisor() {
 
 	// 2. 环境变量处理
 	if local := os.Getenv("LOCAL_UPSTREAM"); local != "" {
-		config.SetUpstream(true, local)
+		if err := config.SetUpstream(true, local); err != nil {
+			log.Printf("⚠️ LOCAL 配置未应用: %v", err)
+		}
 	}
 	if remote := os.Getenv("REMOTE_UPSTREAM"); remote != "" && !config.RemoteManagedByWeb() {
-		config.SetUpstream(false, remote)
+		if err := config.SetUpstream(false, remote); err != nil {
+			log.Printf("⚠️ REMOTE 配置未应用: %v", err)
+		}
 	}
 
 	currLocal, currRemote := config.GetCurrentUpstreams()
 	fmt.Printf("[%s] ⚙️  配置就绪: LOCAL=%s, REMOTE=%s\n", time.Now().Format("2006-01-02 15:04:05"), currLocal, currRemote)
 
+	// Configuration is already final before the first child starts.
+	select {
+	case <-service.RestartChan:
+	default:
+	}
 	// 3. 进程管理协程
 	processDone := make(chan struct{})
 	go func() { defer close(processDone); processManager(ctx) }()
@@ -95,6 +114,7 @@ func runSupervisor() {
 	<-statsDone
 	diagnostics.QueryStats.Flush("/etc/mosdns/query_stats.json")
 	log.Print("👋 MosCtl 已安全关闭。")
+	return nil
 }
 
 // statsScheduler 实现渐进式播报策略
@@ -159,6 +179,7 @@ func processManager(ctx context.Context) {
 			}
 			continue
 		}
+		diagnostics.SetProcess(child.Process.Pid)
 		if acknowledgement != nil {
 			acknowledgement <- nil
 			acknowledgement = nil
@@ -166,7 +187,7 @@ func processManager(ctx context.Context) {
 		done := make(chan error, 1)
 		go func() { done <- child.Wait() }()
 		childCtx, cancel := context.WithCancel(ctx)
-		go func() {
+		go func(pid int) {
 			if !waitForRetry(childCtx, time.Second) {
 				return
 			}
@@ -179,26 +200,34 @@ func processManager(ctx context.Context) {
 			} else {
 				fmt.Printf("[%s] ⚠️ DNS 解析检查未全部通过，请检查上游与网络。\n", time.Now().Format("2006-01-02 15:04:05"))
 			}
-		}()
+			diagnostics.SampleHealth(childCtx, pid)
+			for waitForRetry(childCtx, 30*time.Second) {
+				diagnostics.SampleHealth(childCtx, pid)
+			}
+		}(child.Process.Pid)
 		select {
 		case err := <-done:
 			cancel()
+			diagnostics.SetProcess(0)
 			fmt.Printf("[%s] ⚠️ MosDNS 已退出（%v），稍后重试。\n", time.Now().Format("2006-01-02 15:04:05"), err)
 			if !waitForRetry(ctx, time.Second) {
 				return
 			}
 		case request := <-service.RestartRequests:
 			cancel()
+			diagnostics.SetProcess(0)
 			config.SaveCurrentStatsToHistory()
 			stopChild(child, done)
 			acknowledgement = request.Done
 		case <-service.RestartChan:
 			cancel()
+			diagnostics.SetProcess(0)
 			config.SaveCurrentStatsToHistory()
 			fmt.Printf("[%s] 🔄 正在重新加载 MosDNS...\n", time.Now().Format("2006-01-02 15:04:05"))
 			stopChild(child, done)
 		case <-ctx.Done():
 			cancel()
+			diagnostics.SetProcess(0)
 			config.SaveCurrentStatsToHistory()
 			stopChild(child, done)
 			return
@@ -267,11 +296,16 @@ func fileWatcher(ctx context.Context) {
 			isRule := filepath.Dir(event.Name) == config.RuleDir && strings.HasSuffix(filename, ".txt") && !strings.HasPrefix(filename, ".")
 
 			if (isConfig || isRule) && (event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0) {
+				if service.ManagedContents(event.Name) {
+					continue
+				}
 				if timer != nil {
 					timer.Stop()
 				}
 				timer = time.AfterFunc(1*time.Second, func() {
-					if ctx.Err() != nil {
+					service.OperationMu.Lock()
+					defer service.OperationMu.Unlock()
+					if ctx.Err() != nil || service.ManagedContents(event.Name) {
 						return
 					}
 					fmt.Printf("[%s] 📝 检测到文件变更: %s, 准备重启...\n", time.Now().Format("2006-01-02 15:04:05"), event.Name)
@@ -323,39 +357,82 @@ func UpdateGeoRules() {
 		ghProxy + "https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt":  "/etc/mosdns/rules/geosite_no_cn.txt",
 	}
 
-	anyUpdated := false
+	stage, err := os.MkdirTemp("/etc/mosdns", ".rules-update-*")
+	if err != nil {
+		log.Printf("❌ 规则暂存失败: %v", err)
+		return
+	}
+	defer os.RemoveAll(stage)
+	changes := make(map[string][]byte)
 	for url, path := range files {
-		updated, err := service.DownloadFile(url, path)
+		staged := filepath.Join(stage, filepath.Base(path))
+		if _, err := service.DownloadFile(url, staged); err != nil {
+			log.Printf("⚠️ 规则批次未应用，保留原规则: %v", err)
+			return
+		}
+		data, err := os.ReadFile(staged)
 		if err != nil {
-			log.Printf("⚠️  下载失败 %s: %v (将跳过该文件)\n", path, err)
-		} else if updated {
-			anyUpdated = true
+			log.Printf("⚠️ 无法读取暂存规则: %v", err)
+			return
+		}
+		old, _ := os.ReadFile(path)
+		if !bytes.Equal(old, data) {
+			changes[path] = data
 		}
 	}
-
-	if anyUpdated {
-		log.Print("🎉 规则文件已更新，fsnotify 将自动触发重启。")
-	} else {
+	if len(changes) == 0 {
 		log.Print("✅ 规则已是最新，无需更新。")
+		return
 	}
+	service.OperationMu.Lock()
+	defer service.OperationMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 65*time.Second)
+	defer cancel()
+	apply := func(ctx context.Context) error {
+		if err := service.RestartAndWait(ctx); err != nil {
+			return err
+		}
+		for ctx.Err() == nil {
+			if config.RunTest(ctx) {
+				return nil
+			}
+			if !waitForRetry(ctx, 250*time.Millisecond) {
+				break
+			}
+		}
+		return fmt.Errorf("DNS 就绪检查超时")
+	}
+	if err := service.ApplyFiles(ctx, changes, apply); err != nil {
+		log.Printf("❌ 规则批次应用失败: %v", err)
+		return
+	}
+	log.Printf("🎉 已应用 %d 个规则文件，DNS 检查通过。", len(changes))
 }
 
-func initializeEnv() {
+func initializeEnv() error {
 	if err := os.MkdirAll("/etc/mosdns/rules", 0755); err != nil {
-		log.Printf("❌ 无法创建规则目录: %v\n", err)
+		return fmt.Errorf("无法创建规则目录: %w", err)
 	}
 
 	if _, err := os.Stat("/etc/mosdns/config.yaml"); os.IsNotExist(err) {
 		log.Print("📢 初始化配置模板...")
-		copyFile("/usr/share/mosdns/config.yaml", "/etc/mosdns/config.yaml")
+		if err := copyFile("/usr/share/mosdns/config.yaml", "/etc/mosdns/config.yaml"); err != nil {
+			return fmt.Errorf("初始化配置失败: %w", err)
+		}
 
 		files, _ := filepath.Glob("/usr/share/mosdns/rules/*.txt")
 		for _, f := range files {
-			copyFile(f, filepath.Join("/etc/mosdns/rules", filepath.Base(f)))
+			if err := copyFile(f, filepath.Join("/etc/mosdns/rules", filepath.Base(f))); err != nil {
+				return fmt.Errorf("初始化规则失败: %w", err)
+			}
 		}
 	} else {
-		config.EnsureMetricsServer()
-		config.EnsureDefaultTTL()
+		if err := config.EnsureMetricsServer(); err != nil {
+			return err
+		}
+		if err := config.EnsureDefaultTTL(); err != nil {
+			return err
+		}
 	}
 
 	requiredFiles := []string{
@@ -366,10 +443,13 @@ func initializeEnv() {
 	}
 	for _, rf := range requiredFiles {
 		if _, err := os.Stat(rf); os.IsNotExist(err) {
-			os.WriteFile(rf, []byte{}, 0644)
+			if err := os.WriteFile(rf, []byte{}, 0644); err != nil {
+				return err
+			}
 		}
 	}
 	log.Print("✅ 运行环境初始化核验完成。")
+	return nil
 }
 
 func copyFile(src, dst string) error {
