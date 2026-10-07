@@ -346,37 +346,10 @@ async function loadStats() {
       (total ? (100 * d.local) / total : 0).toFixed(1) + "% · 占全部请求";
     $("#remoteShare").textContent =
       (total ? (100 * d.remote) / total : 0).toFixed(1) + "% · 占全部请求";
-    const results = d.results || {},
-      types = Object.entries(d.types || {})
-        .filter(([, v]) => v)
-        .map(([k, v]) => k + " " + number(v))
-        .join(" · ");
-    $("#resultSummary").textContent =
-      "响应成功 " +
-      number(results.success) +
-      " · 上游 DNS 非成功响应 " +
-      number(results.dns_error) +
-      " · 解析错误 " +
-      number(results.error) +
-      " · 策略拒绝 " +
-      number(results.rejected) +
-      (results.historical
-        ? " · 历史结果未知 " + number(results.historical)
-        : "") +
-      "。查询类型：" +
-      types;
     $("#statsStatus").classList.toggle("error", !response.enabled);
-    $("#statsStatus").textContent =
-      (response.enabled
-        ? "统计日期 " +
-          d.day +
-          " · 本日采集始于 " +
-          new Date(d.started_at).toLocaleTimeString("zh-CN") +
-          " · 刷新 " +
-          new Date(response.fetched_at).toLocaleTimeString("zh-CN")
-        : "当前配置未启用查询统计，请检查运行日志。") +
-      (c.other ? " · 历史“其他”无法追溯拆分。" : "") +
-      (d.unranked ? " · 未纳入排行 " + number(d.unranked) + " 次" : "");
+    $("#statsStatus").textContent = response.enabled
+      ? ""
+      : "当前配置未启用查询统计，请检查运行日志。";
     renderRanking();
     drawStatsCharts();
   } catch (e) {
@@ -547,7 +520,7 @@ function drawStatsCharts() {
     for (let i = 0; i < values.length; i++) {
       cumulative += total ? (values[i] / total) * Math.PI * 2 : 0;
       if (angle <= cumulative) {
-        $("#routeReadout").textContent =
+        e.currentTarget.title =
           ["国内", "国外", "Hosts", "策略拦截", "未细分"][i] +
           " " +
           number(values[i]) +
@@ -571,7 +544,7 @@ function drawStatsCharts() {
       ),
       v = visibleHours[i];
     if (v)
-      $("#hourReadout").textContent =
+      e.currentTarget.title =
         new Date(v.time).toLocaleString("zh-CN", {
           month: "2-digit",
           day: "2-digit",
